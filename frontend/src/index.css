@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* You can add global custom styles below Tailwind directives if needed */
+body {
+  font-family: 'Inter', sans-serif; /* Example: Using a nice sans-serif font */
+  @apply bg-gray-100 text-gray-900; /* Default background and text color */
+}

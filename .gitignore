@@ -1,0 +1,26 @@
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Environment Variables
+.env
+.env*.local
+
+# SQLite Database
+*.sqlite
+*.sqlite-journal
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Frontend build
+frontend/build/
+frontend/node_modules/
+
+# Backend data (if not mapped from a named volume)
+# backend/data/ # Example if you chose to map it directly in backend folder

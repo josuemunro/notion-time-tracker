@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: notion-tracker-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-3001}:${BACKEND_PORT:-3001}"
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/notion_time_tracker.sqlite
+      # NODE_ENV: ${NODE_ENV:-development} # Set this in .env if needed
+    volumes:
+      - backend_data:/data
+      # For development:
+      # - ./backend/src:/usr/src/app/backend/src
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # This tells the React app inside Docker where to find the backend API.
+        # 'backend' is the service name of our backend container in this Docker Compose file.
+        VITE_API_BASE_URL: http://backend:${BACKEND_PORT:-3001}/api
+    container_name: notion-tracker-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80" # Nginx in container listens on 80
+    depends_on:
+      - backend
+    networks:
+      - app-network
+    # For development (optional, if you want live reload for frontend source code changes):
+    # volumes:
+    #  - ./frontend/src:/app/frontend/src
+    #  - ./frontend/public:/app/frontend/public
+    # Note: For Vite with Docker, HMR (Hot Module Replacement) via volume mounts can be tricky
+    # due to how Vite handles file watching. The build-and-run approach is more straightforward for Docker.
+    # For live dev, `npm run dev` outside Docker is usually preferred for frontend.
+
+volumes:
+  backend_data:
+
+networks:
+  app-network:
+    driver: bridge

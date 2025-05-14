@@ -1,0 +1,22 @@
+{
+  "name": "notion-time-tracker-backend",
+  "version": "1.0.0",
+  "description": "Backend for Notion Time Tracker",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
+    "db:init": "node src/database.js init"
+  },
+  "dependencies": {
+    "@notionhq/client": "^3.0.1",
+    "axios": "^1.9.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "sqlite3": "^5.1.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
