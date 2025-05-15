@@ -73,11 +73,14 @@ router.get('/in-progress', async (req, res, next) => {
         t.notionId AS taskNotionId,
         t.name AS taskName,
         t.status AS taskStatus,
-        (SELECT te_active.startTime FROM TimeEntries te_active WHERE te_active.taskId = t.id AND te_active.endTime IS NULL LIMIT 1) AS activeTimerStartTime
+        (SELECT te_active.startTime FROM TimeEntries te_active WHERE te_active.taskId = t.id AND te_active.endTime IS NULL LIMIT 1) AS activeTimerStartTime,
+        COALESCE(SUM(CASE WHEN te_done.endTime IS NOT NULL THEN te_done.duration ELSE 0 END), 0) / 3600.0 AS totalHoursSpent  -- Calculate total logged time
       FROM Tasks t
       JOIN Projects p ON t.projectId = p.id
+      LEFT JOIN TimeEntries te_done ON t.id = te_done.taskId -- Join for completed time entries
       WHERE t.status LIKE '%Doing%' OR 
             EXISTS (SELECT 1 FROM TimeEntries te_check WHERE te_check.taskId = t.id AND te_check.endTime IS NULL)
+      GROUP BY t.id, p.id -- Group by task and project attributes to sum time per task
       ORDER BY p.name COLLATE NOCASE, t.name COLLATE NOCASE;
     `;
     db.all(query, [], (err, rows) => {
@@ -98,7 +101,8 @@ router.get('/in-progress', async (req, res, next) => {
                 notionId: taskData.taskNotionId,
                 name: taskData.taskName,
                 status: taskData.taskStatus,
-                activeTimerStartTime: taskData.activeTimerStartTime
+                activeTimerStartTime: taskData.activeTimerStartTime,
+                totalHoursSpent: row.totalHoursSpent
             });
         }
         return acc;

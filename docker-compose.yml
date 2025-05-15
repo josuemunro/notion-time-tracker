@@ -28,7 +28,7 @@ services:
       args:
         # This tells the React app inside Docker where to find the backend API.
         # 'backend' is the service name of our backend container in this Docker Compose file.
-        VITE_API_BASE_URL: http://backend:${BACKEND_PORT:-3001}/api
+        VITE_API_BASE_URL: /api
     container_name: notion-tracker-frontend
     restart: unless-stopped
     ports:

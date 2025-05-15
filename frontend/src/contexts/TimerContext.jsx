@@ -94,7 +94,7 @@ export const TimerProvider = ({ children }) => {
     const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
     const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
     const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-    return `<span class="math-inline">\{hours\}\:</span>{minutes}:${seconds}`;
+    return `${hours}:${minutes}:${seconds}`;
   };
 
   return (

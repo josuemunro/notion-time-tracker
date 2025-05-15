@@ -2,25 +2,19 @@
 FROM node:18-alpine AS builder
 WORKDIR /app/frontend
 
-# Copy package.json and package-lock.json (or yarn.lock)
+# Define the build argument that Vite can use
+# Default value if not provided by docker-compose build args
+ARG VITE_API_BASE_URL=/api
+# Make it available to npm run build
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
 COPY package*.json ./
-
-# Install dependencies
 RUN npm install
-
-# Copy the rest of the application code
 COPY . .
 
-# Build the application
-# The REACT_APP_API_BASE_URL will be used by the app to know where the backend is.
-# For Docker Compose, this can be http://backend:BACKEND_PORT
-# For local dev (npm run dev), Vite proxy handles this.
-ARG REACT_APP_API_BASE_URL=/api 
-# Ensure your app uses this env var (e.g., process.env.REACT_APP_API_BASE_URL or import.meta.env.VITE_API_BASE_URL for Vite)
-# For Vite, environment variables prefixed with VITE_ are exposed to the client-side code.
-# So, we'll use VITE_API_BASE_URL. The build command will pass this.
-ENV VITE_API_BASE_URL=${REACT_APP_API_BASE_URL}
-RUN npm run build
+# During build, Vite will replace import.meta.env.VITE_API_BASE_URL if it uses it.
+# Our api.js now hardcodes '/api' for baseURL, but this ENV is good practice.
+RUN echo "Building with VITE_API_BASE_URL=${VITE_API_BASE_URL}" && npm run build
 
 # Stage 2: Serve the application with Nginx
 FROM nginx:stable-alpine
