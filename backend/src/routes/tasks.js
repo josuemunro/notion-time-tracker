@@ -78,7 +78,7 @@ router.get('/in-progress', async (req, res, next) => {
       FROM Tasks t
       JOIN Projects p ON t.projectId = p.id
       LEFT JOIN TimeEntries te_done ON t.id = te_done.taskId -- Join for completed time entries
-      WHERE t.status LIKE '%Doing%' OR 
+      WHERE t.status LIKE '%Doing%' OR '%To Do%'
             EXISTS (SELECT 1 FROM TimeEntries te_check WHERE te_check.taskId = t.id AND te_check.endTime IS NULL)
       GROUP BY t.id, p.id -- Group by task and project attributes to sum time per task
       ORDER BY p.name COLLATE NOCASE, t.name COLLATE NOCASE;
