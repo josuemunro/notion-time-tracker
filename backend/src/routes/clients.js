@@ -12,6 +12,7 @@ router.get('/', async (req, res, next) => {
         c.id,
         c.notionId,
         c.name,
+        c.status,
         c.createdAt,
         c.updatedAt,
         COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent
@@ -19,7 +20,39 @@ router.get('/', async (req, res, next) => {
       LEFT JOIN Projects p ON c.id = p.clientId
       LEFT JOIN Tasks t ON p.id = t.projectId
       LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
-      GROUP BY c.id, c.notionId, c.name, c.createdAt, c.updatedAt
+      GROUP BY c.id, c.notionId, c.name, c.status, c.createdAt, c.updatedAt
+      ORDER BY c.name COLLATE NOCASE;
+    `;
+    db.all(query, [], (err, rows) => {
+      if (err) {
+        return next(err);
+      }
+      res.json(rows);
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/clients/active - Get only active clients (excluding Done/deleted)
+router.get('/active', async (req, res, next) => {
+  const db = database.getDb();
+  try {
+    const query = `
+      SELECT
+        c.id,
+        c.notionId,
+        c.name,
+        c.status,
+        c.createdAt,
+        c.updatedAt,
+        COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent
+      FROM Clients c
+      LEFT JOIN Projects p ON c.id = p.clientId
+      LEFT JOIN Tasks t ON p.id = t.projectId
+      LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
+      WHERE c.status IS NULL OR (c.status != 'Done' AND c.status != 'Completed' AND c.status != 'Archived')
+      GROUP BY c.id, c.notionId, c.name, c.status, c.createdAt, c.updatedAt
       ORDER BY c.name COLLATE NOCASE;
     `;
     db.all(query, [], (err, rows) => {

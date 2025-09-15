@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getClientDetails } from '../services/api';
 import { ArrowPathIcon, ArrowLeftIcon, BriefcaseIcon, ClockIcon } from '@heroicons/react/24/solid'; // Added icons
+import { formatHoursHuman } from '../utils/timeUtils';
 
 function ProjectRow({ project }) {
   const budgetUsedPercent = project.budgetedTime > 0
@@ -15,17 +16,16 @@ function ProjectRow({ project }) {
     >
       <div className="flex justify-between items-center mb-2">
         <h4 className="font-semibold text-lg text-blue-600">{project.name}</h4>
-        <span className={`px-2 py-0.5 text-xs rounded-full ${
-          project.status === 'Active' || project.status === 'In Progress' ? 'bg-green-100 text-green-700' :
+        <span className={`px-2 py-0.5 text-xs rounded-full ${project.status === 'Active' || project.status === 'In Progress' ? 'bg-green-100 text-green-700' :
           project.status === 'Completed' ? 'bg-blue-100 text-blue-700' :
-          'bg-gray-100 text-gray-700'
-        }`}>{project.status || 'N/A'}</span>
+            'bg-gray-100 text-gray-700'
+          }`}>{project.status || 'N/A'}</span>
       </div>
 
       <div className="text-sm text-gray-600 space-y-1">
         <div className="flex items-center">
           <ClockIcon className="h-4 w-4 mr-1.5 text-gray-400" />
-          Logged: {parseFloat(project.totalHoursSpent || 0).toFixed(1)} hrs / Budgeted: {parseFloat(project.budgetedTime || 0).toFixed(1)} hrs
+          Logged: {formatHoursHuman(parseFloat(project.totalHoursSpent || 0))} / Budgeted: {formatHoursHuman(parseFloat(project.budgetedTime || 0))}
         </div>
         {project.budgetedTime > 0 && (
           <div className="w-full bg-gray-200 rounded-full h-2">
@@ -88,7 +88,7 @@ function ClientDetailPage() {
             <h1 className="text-3xl font-bold text-gray-800 mb-1">{client.name}</h1>
             <p className="text-gray-600">
               Total Time Logged for Client:
-              <span className="font-semibold ml-1">{totalHoursForClient.toFixed(2)} hrs</span>
+              <span className="font-semibold ml-1">{formatHoursHuman(totalHoursForClient)}</span>
             </p>
           </div>
           <button onClick={fetchClient} disabled={isLoading} className="mt-4 sm:mt-0 p-2 rounded-full hover:bg-gray-100 transition-colors" title="Refresh data">

@@ -14,6 +14,9 @@ router.get('/', async (req, res, next) => {
         p.name,
         p.budgetedTime,
         p.status,
+              p.iconType,
+      p.iconValue,
+      p.color,
         p.createdAt AS projectCreatedAt,
         p.updatedAt AS projectUpdatedAt,
         c.id AS clientId,
@@ -24,14 +27,54 @@ router.get('/', async (req, res, next) => {
       LEFT JOIN Clients c ON p.clientId = c.id
       LEFT JOIN Tasks t ON p.id = t.projectId
       LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
-      GROUP BY p.id, p.notionId, p.name, p.budgetedTime, p.status, p.createdAt, p.updatedAt, c.id, c.name, c.notionId
+      GROUP BY p.id, p.notionId, p.name, p.budgetedTime, p.status, p.iconType, p.iconValue, p.color, p.createdAt, p.updatedAt, c.id, c.name, c.notionId
       ORDER BY p.name COLLATE NOCASE;
     `;
     db.all(query, [], (err, rows) => {
       if (err) return next(err);
       res.json(rows.map(row => ({
-          ...row,
-          percentageBudgetUsed: row.budgetedTime > 0 ? ((row.totalHoursSpent / row.budgetedTime) * 100) : 0
+        ...row,
+        percentageBudgetUsed: row.budgetedTime > 0 ? ((row.totalHoursSpent / row.budgetedTime) * 100) : 0
+      })));
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/projects/active - Get all active projects with aggregated time and client info
+router.get('/active', async (req, res, next) => {
+  const db = database.getDb(); // Get db instance inside the handler
+  try {
+    const query = `
+      SELECT
+        p.id,
+        p.notionId,
+        p.name,
+        p.budgetedTime,
+        p.status,
+        p.iconType,
+        p.iconValue,
+        p.color,
+        p.createdAt AS projectCreatedAt,
+        p.updatedAt AS projectUpdatedAt,
+        c.id AS clientId,
+        c.name AS clientName,
+        c.notionId AS clientNotionId,
+        COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent
+      FROM Projects p
+      LEFT JOIN Clients c ON p.clientId = c.id
+      LEFT JOIN Tasks t ON p.id = t.projectId
+      LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
+      WHERE p.status IN ('Proposal', 'In Progress', 'Ongoing')
+      GROUP BY p.id, p.notionId, p.name, p.budgetedTime, p.status, p.iconType, p.iconValue, p.color, p.createdAt, p.updatedAt, c.id, c.name, c.notionId
+      ORDER BY p.name COLLATE NOCASE;
+    `;
+    db.all(query, [], (err, rows) => {
+      if (err) return next(err);
+      res.json(rows.map(row => ({
+        ...row,
+        percentageBudgetUsed: row.budgetedTime > 0 ? ((row.totalHoursSpent / row.budgetedTime) * 100) : 0
       })));
     });
   } catch (error) {
@@ -51,6 +94,9 @@ router.get('/:projectId', async (req, res, next) => {
         p.name,
         p.budgetedTime,
         p.status,
+        p.iconType,
+        p.iconValue,
+        p.color,
         p.createdAt,
         p.updatedAt,
         c.id AS clientId,
@@ -61,7 +107,7 @@ router.get('/:projectId', async (req, res, next) => {
       LEFT JOIN Tasks t ON p.id = t.projectId
       LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
       WHERE (p.id = ? OR p.notionId = ?)
-      GROUP BY p.id, p.notionId, p.name, p.budgetedTime, p.status, p.createdAt, p.updatedAt, c.id, c.name;
+      GROUP BY p.id, p.notionId, p.name, p.budgetedTime, p.status, p.iconType, p.iconValue, p.color, p.createdAt, p.updatedAt, c.id, c.name;
     `;
     db.get(projectQuery, [idOrNotionId, idOrNotionId], (err, project) => {
       if (err) return next(err);
@@ -85,10 +131,49 @@ router.get('/:projectId', async (req, res, next) => {
       db.all(tasksQuery, [project.id], (err, tasks) => {
         if (err) return next(err);
         res.json({
-            ...project,
-            percentageBudgetUsed: project.budgetedTime > 0 ? ((project.totalHoursSpent / project.budgetedTime) * 100) : 0,
-            tasks
+          ...project,
+          percentageBudgetUsed: project.budgetedTime > 0 ? ((project.totalHoursSpent / project.budgetedTime) * 100) : 0,
+          tasks
         });
+      });
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/projects/:projectId - Update a project's local properties (color, etc.)
+router.put('/:projectId', async (req, res, next) => {
+  const db = database.getDb();
+  const { projectId } = req.params;
+  const { color } = req.body;
+
+  if (!color) {
+    return res.status(400).json({ message: 'color is required.' });
+  }
+
+  // Validate hex color format
+  const hexColorRegex = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
+  if (!hexColorRegex.test(color)) {
+    return res.status(400).json({ message: 'color must be a valid hex color (e.g., #FF5733 or #F53)' });
+  }
+
+  try {
+    const updateQuery = `
+      UPDATE Projects 
+      SET color = ? 
+      WHERE id = ? OR notionId = ?
+    `;
+
+    db.run(updateQuery, [color, projectId, projectId], function (err) {
+      if (err) return next(err);
+      if (this.changes === 0) {
+        return res.status(404).json({ message: 'Project not found.' });
+      }
+      res.json({
+        message: 'Project updated successfully.',
+        projectId: projectId,
+        color: color
       });
     });
   } catch (error) {

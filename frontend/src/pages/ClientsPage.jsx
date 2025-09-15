@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { getClients } from '../services/api';
+import { getActiveClients } from '../services/api';
 import { ArrowPathIcon, UserGroupIcon } from '@heroicons/react/24/solid'; // Added UserGroupIcon
+import { formatHoursHuman } from '../utils/timeUtils';
 
 function ClientCard({ client }) {
   return (
@@ -17,7 +18,7 @@ function ClientCard({ client }) {
         <p>
           Total Time Logged:
           <span className="font-medium ml-1">
-            {parseFloat(client.totalHoursSpent || 0).toFixed(2)} hrs
+            {formatHoursHuman(parseFloat(client.totalHoursSpent || 0))}
           </span>
         </p>
         {/* You can add more summary details here if available, like number of projects */}
@@ -35,13 +36,13 @@ function ClientsPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const { data } = await getClients();
+      const { data } = await getActiveClients();
       if (Array.isArray(data)) {
         setClients(data);
       } else {
-        console.warn('/api/clients did not return an array. Received:', data);
+        console.warn('/api/clients/active did not return an array. Received:', data);
         setClients([]);
-        setError(data?.message || 'Failed to load clients: Unexpected data format.');
+        setError(data?.message || 'Failed to load active clients: Unexpected data format.');
       }
     } catch (err) {
       console.error("Failed to fetch clients:", err);
@@ -67,11 +68,13 @@ function ClientsPage() {
   return (
     <div>
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">Clients</h1>
-        {/* Add New Client button could go here if app created clients */}
+        <h1 className="text-3xl font-bold text-gray-800">Active Clients</h1>
+        <button onClick={fetchClients} disabled={isLoading} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Refresh clients">
+          <ArrowPathIcon className={`h-6 w-6 text-gray-600 ${isLoading ? 'animate-spin' : ''}`} />
+        </button>
       </div>
       {clients.length === 0 && !isLoading && (
-        <p className="text-center text-gray-500 py-8">No clients found. Try syncing with Notion first.</p>
+        <p className="text-center text-gray-500 py-8">No active clients found. Try syncing with Notion first.</p>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {clients.map(client => (

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -47,6 +45,7 @@ services:
 
 volumes:
   backend_data:
+
 
 networks:
   app-network:

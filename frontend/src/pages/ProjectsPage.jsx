@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { getProjects } from '../services/api';
+import { getProjects, getActiveProjects } from '../services/api';
 import { ArrowPathIcon } from '@heroicons/react/24/solid';
+import { formatHoursHuman } from '../utils/timeUtils';
+import ProjectIcon from '../components/ProjectIcon';
 
 function ProjectCard({ project }) {
   const budgetUsedPercent = project.budgetedTime > 0
@@ -10,9 +12,20 @@ function ProjectCard({ project }) {
 
   return (
     <Link to={`/projects/${project.id}`} className="block p-6 bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow duration-200 ease-in-out">
-      <h3 className="text-xl font-semibold text-blue-700 mb-2">{project.name}</h3>
-      <p className="text-sm text-gray-600 mb-1">Client: {project.clientName || 'N/A'}</p>
-      <p className="text-sm text-gray-600 mb-3">Status: <span className="font-medium">{project.status || 'N/A'}</span></p>
+      <div className="flex items-start space-x-3 mb-3">
+        <ProjectIcon
+          iconType={project.iconType}
+          iconValue={project.iconValue}
+          projectName={project.name}
+          projectColor={project.color}
+          className="w-8 h-8 mt-1"
+        />
+        <div className="flex-1 min-w-0">
+          <h3 className="text-xl font-semibold text-blue-700 mb-1 truncate">{project.name}</h3>
+          <p className="text-sm text-gray-600 mb-1">Client: {project.clientName || 'N/A'}</p>
+          <p className="text-sm text-gray-600 mb-2">Status: <span className="font-medium">{project.status || 'N/A'}</span></p>
+        </div>
+      </div>
 
       <div className="mb-3">
         <div className="flex justify-between text-xs text-gray-500 mb-1">
@@ -29,7 +42,7 @@ function ProjectCard({ project }) {
 
       <div className="text-sm">
         <p>Budgeted: <span className="font-medium">{parseFloat(project.budgetedTime || 0).toFixed(1)} hrs</span></p>
-        <p>Logged: <span className="font-medium">{parseFloat(project.totalHoursSpent || 0).toFixed(1)} hrs</span></p>
+        <p>Logged: <span className="font-medium">{formatHoursHuman(parseFloat(project.totalHoursSpent || 0))}</span></p>
       </div>
     </Link>
   );
@@ -44,7 +57,7 @@ function ProjectsPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const { data } = await getProjects();
+      const { data } = await getActiveProjects();
       setProjects(data || []);
     } catch (err) {
       console.error("Failed to fetch projects:", err);
@@ -60,8 +73,8 @@ function ProjectsPage() {
 
   if (isLoading) return (
     <div className="flex justify-center items-center h-64">
-        <ArrowPathIcon className="h-12 w-12 text-gray-500 animate-spin" />
-        <p className="ml-3 text-lg text-gray-700">Loading Projects...</p>
+      <ArrowPathIcon className="h-12 w-12 text-gray-500 animate-spin" />
+      <p className="ml-3 text-lg text-gray-700">Loading Projects...</p>
     </div>
   );
   if (error) return <p className="text-center text-red-500 bg-red-100 p-4 rounded-md">{error}</p>;

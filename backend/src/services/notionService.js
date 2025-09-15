@@ -71,10 +71,10 @@ function getSelectValue(property) {
  * Helper to extract status value (name) from a Notion property.
  */
 function getStatusValue(property) {
-    if (property && property.status) {
-        return property.status.name;
-    }
-    return null;
+  if (property && property.status) {
+    return property.status.name;
+  }
+  return null;
 }
 
 /**
@@ -91,7 +91,42 @@ function getRelationId(property) {
  * Helper to extract checkbox value from a Notion property.
  */
 function getCheckboxValue(property) {
-    return property && property.checkbox ? property.checkbox : false;
+  return property && property.checkbox ? property.checkbox : false;
+}
+
+/**
+ * Helper to extract people value from a Notion property.
+ */
+function getPeopleValue(property) {
+  if (property && property.people && property.people.length > 0) {
+    return property.people.map(person => person.name || person.id).join(', ');
+  }
+  return null;
+}
+
+/**
+ * Helper to extract icon value from a Notion page.
+ */
+function getIconValue(page) {
+  if (page.icon) {
+    if (page.icon.type === 'emoji') {
+      return {
+        type: 'emoji',
+        value: page.icon.emoji
+      };
+    } else if (page.icon.type === 'external') {
+      return {
+        type: 'external',
+        value: page.icon.external.url
+      };
+    } else if (page.icon.type === 'file') {
+      return {
+        type: 'file',
+        value: page.icon.file.url
+      };
+    }
+  }
+  return null;
 }
 
 // --- Fetching Data from Notion (Remains the same logic) ---
@@ -122,7 +157,7 @@ async function queryNotionDatabase(databaseId, filter = undefined, sorts = undef
   } catch (error) {
     console.error(`Error querying Notion database ${databaseId}:`, error.body || error.message);
     if (error.code === APIErrorCode.ObjectNotFound || error.code === APIErrorCode.Unauthorized) {
-        console.error(`Check if NOTION_API_KEY has access to database ID: ${databaseId}`);
+      console.error(`Check if NOTION_API_KEY has access to database ID: ${databaseId}`);
     }
     return [];
   }
@@ -138,6 +173,7 @@ async function fetchNotionClients() {
   return pages.map(page => ({
     notionId: page.id,
     name: getTitleValue(page.properties.Name), // Assumes 'Name' is the title property
+    status: getStatusValue(page.properties.Status) || getSelectValue(page.properties.Status) || getSelectValue(page.properties.Stage),
     lastEditedTime: page.last_edited_time,
   }));
 }
@@ -149,14 +185,19 @@ async function fetchNotionProjects() {
   }
   console.log('Fetching projects from Notion...');
   const pages = await queryNotionDatabase(NOTION_PROJECTS_DB_ID);
-  return pages.map(page => ({
-    notionId: page.id,
-    name: getTitleValue(page.properties['Project Name']), // Assumes 'Project Name' is title
-    notionClientId: getRelationId(page.properties['Client Link']),
-    budgetedTime: getNumberValue(page.properties['Budget (hrs)']),
-    status: getStatusValue(page.properties['Status']) || getSelectValue(page.properties['Status']),
-    lastEditedTime: page.last_edited_time,
-  }));
+  return pages.map(page => {
+    const icon = getIconValue(page);
+    return {
+      notionId: page.id,
+      name: getTitleValue(page.properties['Project Name']), // Assumes 'Project Name' is title
+      notionClientId: getRelationId(page.properties['Client Link']),
+      budgetedTime: getNumberValue(page.properties['Budget (hrs)']),
+      status: getStatusValue(page.properties['Status']) || getSelectValue(page.properties['Status']),
+      iconType: icon ? icon.type : null,
+      iconValue: icon ? icon.value : null,
+      lastEditedTime: page.last_edited_time,
+    };
+  });
 }
 
 async function fetchNotionTasks() {
@@ -165,15 +206,35 @@ async function fetchNotionTasks() {
     return [];
   }
   console.log('Fetching tasks from Notion...');
-  const pages = await queryNotionDatabase(NOTION_TASKS_DB_ID);
+
+  // Create filter to only fetch tasks assigned to "Josue Munro"
+  const filter = {
+    or: [
+      {
+        property: 'Assign',
+        people: {
+          contains: process.env.NOTION_USER_ID || 'Josue Munro'
+        }
+      },
+      {
+        property: 'Assign',
+        people: {
+          is_empty: true
+        }
+      }
+    ]
+  };
+
+  const pages = await queryNotionDatabase(NOTION_TASKS_DB_ID, filter);
   return pages.map(page => ({
     notionId: page.id,
     name: getTitleValue(page.properties['Task Name']), // Assumes 'Task Name' is title
     notionProjectId: getRelationId(page.properties['Project Link']),
     status: getStatusValue(page.properties['Status']) || getSelectValue(page.properties['Status']),
     isBillable: getCheckboxValue(page.properties['Is Billable']),
+    assignee: getPeopleValue(page.properties['Assign']),
     lastEditedTime: page.last_edited_time,
-  }));
+  })).filter(task => !task.assignee || task.assignee.includes('Josue Munro'));
 }
 
 // --- Syncing Data from Notion to Local SQLite DB (Remains the same logic) ---
@@ -189,15 +250,16 @@ async function syncClientsWithDb() {
   return new Promise((resolve, reject) => {
     localDb.serialize(() => {
       const stmt = localDb.prepare(`
-        INSERT INTO Clients (notionId, name, updatedAt)
-        VALUES (?, ?, ?)
+        INSERT INTO Clients (notionId, name, status, updatedAt)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT(notionId) DO UPDATE SET
           name = excluded.name,
+          status = excluded.status,
           updatedAt = excluded.updatedAt;
       `);
       let completed = 0;
       notionClients.forEach(client => {
-        stmt.run(client.notionId, client.name, client.lastEditedTime, (err) => {
+        stmt.run(client.notionId, client.name, client.status, client.lastEditedTime, (err) => {
           if (err) console.error('Error syncing client to DB:', client.notionId, err.message);
           completed++;
           if (completed === notionClients.length) {
@@ -225,13 +287,15 @@ async function syncProjectsWithDb() {
   return new Promise((resolve, reject) => {
     localDb.serialize(() => {
       const stmt = localDb.prepare(`
-        INSERT INTO Projects (notionId, name, notionClientId, budgetedTime, status, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO Projects (notionId, name, notionClientId, budgetedTime, status, iconType, iconValue, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(notionId) DO UPDATE SET
           name = excluded.name,
           notionClientId = excluded.notionClientId,
           budgetedTime = excluded.budgetedTime,
           status = excluded.status,
+          iconType = excluded.iconType,
+          iconValue = excluded.iconValue,
           updatedAt = excluded.updatedAt;
       `);
       let completed = 0;
@@ -242,6 +306,8 @@ async function syncProjectsWithDb() {
           proj.notionClientId,
           proj.budgetedTime,
           proj.status,
+          proj.iconType,
+          proj.iconValue,
           proj.lastEditedTime,
           (err) => {
             if (err) console.error('Error syncing project to DB:', proj.notionId, err.message);
@@ -272,13 +338,14 @@ async function syncTasksWithDb() {
   return new Promise((resolve, reject) => {
     localDb.serialize(() => {
       const stmt = localDb.prepare(`
-        INSERT INTO Tasks (notionId, name, notionProjectId, status, isBillable, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO Tasks (notionId, name, notionProjectId, status, isBillable, assignee, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(notionId) DO UPDATE SET
           name = excluded.name,
           notionProjectId = excluded.notionProjectId,
           status = excluded.status,
           isBillable = excluded.isBillable,
+          assignee = excluded.assignee,
           updatedAt = excluded.updatedAt;
       `);
       let completed = 0;
@@ -289,6 +356,7 @@ async function syncTasksWithDb() {
           task.notionProjectId,
           task.status,
           task.isBillable,
+          task.assignee,
           task.lastEditedTime,
           (err) => {
             if (err) console.error('Error syncing task to DB:', task.notionId, err.message);
@@ -330,45 +398,45 @@ async function syncAllFromNotion() {
 }
 
 async function updateLocalRelationalIds() {
-    const localDb = db.getDb();
-    console.log('Updating local relational IDs...');
+  const localDb = db.getDb();
+  console.log('Updating local relational IDs...');
 
-    const updateProjectClientIdsPromise = new Promise((resolve, reject) => {
-        localDb.run(`
+  const updateProjectClientIdsPromise = new Promise((resolve, reject) => {
+    localDb.run(`
             UPDATE Projects
             SET clientId = (SELECT id FROM Clients WHERE Clients.notionId = Projects.notionClientId)
             WHERE Projects.notionClientId IS NOT NULL AND (Projects.clientId IS NULL OR Projects.clientId != (SELECT id FROM Clients WHERE Clients.notionId = Projects.notionClientId));
-        `, function(err) { // Added condition to re-update if changed
-            if (err) {
-                console.error('Error updating Project client IDs:', err.message);
-                return reject(err);
-            }
-            console.log(`Project client IDs updated. ${this.changes} rows affected.`);
-            resolve();
-        });
+        `, function (err) { // Added condition to re-update if changed
+      if (err) {
+        console.error('Error updating Project client IDs:', err.message);
+        return reject(err);
+      }
+      console.log(`Project client IDs updated. ${this.changes} rows affected.`);
+      resolve();
     });
+  });
 
-    const updateTaskProjectIdsPromise = new Promise((resolve, reject) => {
-        localDb.run(`
+  const updateTaskProjectIdsPromise = new Promise((resolve, reject) => {
+    localDb.run(`
             UPDATE Tasks
             SET projectId = (SELECT id FROM Projects WHERE Projects.notionId = Tasks.notionProjectId)
             WHERE Tasks.notionProjectId IS NOT NULL AND (Tasks.projectId IS NULL OR Tasks.projectId != (SELECT id FROM Projects WHERE Projects.notionId = Tasks.notionProjectId));
-        `, function(err) { // Added condition to re-update if changed
-            if (err) {
-                console.error('Error updating Task project IDs:', err.message);
-                return reject(err);
-            }
-            console.log(`Task project IDs updated. ${this.changes} rows affected.`);
-            resolve();
-        });
+        `, function (err) { // Added condition to re-update if changed
+      if (err) {
+        console.error('Error updating Task project IDs:', err.message);
+        return reject(err);
+      }
+      console.log(`Task project IDs updated. ${this.changes} rows affected.`);
+      resolve();
     });
+  });
 
-    try {
-        await Promise.all([updateProjectClientIdsPromise, updateTaskProjectIdsPromise]);
-        console.log('Local relational IDs updated successfully.');
-    } catch (error) {
-        console.error('Failed to update all local relational IDs:', error);
-    }
+  try {
+    await Promise.all([updateProjectClientIdsPromise, updateTaskProjectIdsPromise]);
+    console.log('Local relational IDs updated successfully.');
+  } catch (error) {
+    console.error('Failed to update all local relational IDs:', error);
+  }
 }
 
 // --- Pushing Data to Notion (REMOVED) ---

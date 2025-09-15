@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
 import { getActiveTimer, startTimer as apiStartTimer, stopTimer as apiStopTimer } from '../services/api';
+import { formatTimerDisplay } from '../utils/timeUtils';
 
 export const TimerContext = createContext();
 
@@ -53,6 +54,21 @@ export const TimerProvider = ({ children }) => {
     return () => clearInterval(interval);
   }, [activeTimerDetails]);
 
+  // Update document title when timer is running
+  useEffect(() => {
+    if (activeTimerDetails && elapsedTime > 0) {
+      const formattedTime = formatTimerDisplay(elapsedTime);
+      document.title = `${formattedTime} - ${activeTimerDetails.taskName} | Time Tracker`;
+    } else {
+      document.title = 'Time Tracker';
+    }
+
+    // Cleanup function to reset title when component unmounts
+    return () => {
+      document.title = 'Time Tracker';
+    };
+  }, [activeTimerDetails, elapsedTime]);
+
   const startTimer = async (taskId, taskName = 'Selected Task', projectName = 'Project') => {
     if (activeTimerDetails?.taskId === taskId) {
       console.log("Timer already running for this task.");
@@ -91,10 +107,7 @@ export const TimerProvider = ({ children }) => {
   };
 
   const formatTime = (totalSeconds) => {
-    const hours = Math.floor(totalSeconds / 3600).toString().padStart(2, '0');
-    const minutes = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, '0');
-    const seconds = (totalSeconds % 60).toString().padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
+    return formatTimerDisplay(totalSeconds);
   };
 
   return (

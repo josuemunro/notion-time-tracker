@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useTimer } from '../contexts/TimerContext';
 import { getTasksInProgress } from '../services/api';
 import TaskItem from '../components/common/TaskItem';
+import TimelineView from '../components/TimelineView';
+import DopamineTimer from '../components/DopamineTimer';
 import { PlayIcon, StopIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
 
 function HomePage() {
@@ -18,6 +20,9 @@ function HomePage() {
   const [inProgressTasksByProject, setInProgressTasksByProject] = useState([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
   const [errorTasks, setErrorTasks] = useState(null);
+
+  // Memoize today's date to prevent unnecessary re-renders of TimelineView
+  const todayDate = useMemo(() => new Date().toISOString().split('T')[0], []);
 
   const fetchInProgress = async () => {
     setIsLoadingTasks(true);
@@ -80,37 +85,23 @@ function HomePage() {
 
   return (
     <div className="space-y-12">
-      {/* Main Timer Display */}
-      <div className="bg-white p-6 sm:p-8 rounded-xl shadow-2xl max-w-lg mx-auto text-center">
-        <h2 className="text-xl sm:text-2xl font-semibold mb-2 text-gray-700">
-          {isRunning && activeTimerDetails ? `Tracking: ${activeTimerDetails.taskName}` : 'No Task Running'}
-        </h2>
-        {isRunning && activeTimerDetails && (
-          <p className="text-sm text-gray-500 mb-4">Project: {activeTimerDetails.projectName}</p>
-        )}
-        <div className="text-5xl sm:text-7xl font-mono text-gray-800 mb-6 tracking-wider">
-          <span class="math-inline">{formattedElapsedTime}</span>
-        </div>
-        {!isRunning ? (
-          <p className="text-gray-600 mb-6">Select a task below to start tracking.</p>
-        ) : (
+      {/* Enhanced Dopamine Timer */}
+      <DopamineTimer />
+
+      {/* Stop Button for Active Timer */}
+      {isRunning && (
+        <div className="max-w-lg mx-auto">
           <button
             onClick={handleStop}
-            className="w-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white font-bold py-3 sm:py-4 px-6 rounded-lg text-lg transition-colors duration-150 ease-in-out"
+            className="w-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-lg text-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
           >
             <StopIcon className="h-6 w-6 mr-2" /> Stop Timer
           </button>
-        )}
-        {/* Example of how to manually start a timer IF you had a selector - for now, start from list */}
-        {/* {!isRunning && (
-            <button
-                onClick={() => startTimer(SOME_DEFAULT_TASK_ID, 'Default Task', 'Default Project')} // Replace with actual task selection
-                className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-lg text-lg"
-            >
-                <PlayIcon className="h-6 w-6 mr-2 inline" /> Start Default Task (Test)
-            </button>
-         )} */}
-      </div>
+        </div>
+      )}
+
+      {/* Timeline View */}
+      <TimelineView selectedDate={todayDate} />
 
       {/* In-Progress Tasks List */}
       <div>

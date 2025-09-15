@@ -14,6 +14,7 @@ router.get('/', async (req, res, next) => {
       t.name,
       t.status,
       t.isBillable,
+      t.assignee,
       t.createdAt AS taskCreatedAt,
       t.updatedAt AS taskUpdatedAt,
       p.id AS projectId,
@@ -46,7 +47,7 @@ router.get('/', async (req, res, next) => {
   }
 
   query += `
-    GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.createdAt, t.updatedAt, p.id, p.name, p.notionId, c.id, c.name, c.notionId
+    GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.assignee, t.createdAt, t.updatedAt, p.id, p.name, p.notionId, c.id, c.name, c.notionId
     ORDER BY p.name COLLATE NOCASE, t.name COLLATE NOCASE;
   `;
 
@@ -73,13 +74,15 @@ router.get('/in-progress', async (req, res, next) => {
         t.notionId AS taskNotionId,
         t.name AS taskName,
         t.status AS taskStatus,
+        t.assignee AS taskAssignee,
         (SELECT te_active.startTime FROM TimeEntries te_active WHERE te_active.taskId = t.id AND te_active.endTime IS NULL LIMIT 1) AS activeTimerStartTime,
         COALESCE(SUM(CASE WHEN te_done.endTime IS NOT NULL THEN te_done.duration ELSE 0 END), 0) / 3600.0 AS totalHoursSpent  -- Calculate total logged time
       FROM Tasks t
       JOIN Projects p ON t.projectId = p.id
       LEFT JOIN TimeEntries te_done ON t.id = te_done.taskId -- Join for completed time entries
-      WHERE t.status LIKE '%Doing%' OR '%To Do%'
-            EXISTS (SELECT 1 FROM TimeEntries te_check WHERE te_check.taskId = t.id AND te_check.endTime IS NULL)
+      WHERE (t.status IN ('Doing', 'To Do') OR
+            EXISTS (SELECT 1 FROM TimeEntries te_check WHERE te_check.taskId = t.id AND te_check.endTime IS NULL))
+            AND (t.assignee IS NULL OR t.assignee LIKE '%Josue Munro%')
       GROUP BY t.id, p.id -- Group by task and project attributes to sum time per task
       ORDER BY p.name COLLATE NOCASE, t.name COLLATE NOCASE;
     `;
@@ -96,14 +99,15 @@ router.get('/in-progress', async (req, res, next) => {
           };
         }
         if (taskData.taskId) {
-            acc[projectId].tasks.push({
-                id: taskData.taskId,
-                notionId: taskData.taskNotionId,
-                name: taskData.taskName,
-                status: taskData.taskStatus,
-                activeTimerStartTime: taskData.activeTimerStartTime,
-                totalHoursSpent: row.totalHoursSpent
-            });
+          acc[projectId].tasks.push({
+            id: taskData.taskId,
+            notionId: taskData.taskNotionId,
+            name: taskData.taskName,
+            status: taskData.taskStatus,
+            assignee: taskData.taskAssignee,
+            activeTimerStartTime: taskData.activeTimerStartTime,
+            totalHoursSpent: row.totalHoursSpent
+          });
         }
         return acc;
       }, {});

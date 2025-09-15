@@ -23,15 +23,23 @@ export const getActiveTimer = () => apiClient.get('/time-entries/active');
 export const startTimer = (taskId) => apiClient.post('/time-entries/start', { taskId });
 export const stopTimer = (timeEntryId) => apiClient.post(`/time-entries/${timeEntryId}/stop`);
 export const syncNotion = () => apiClient.post('/sync/notion'); // Will now be POST to /api/sync/notion
+
+// Time Entries
+export const getTimeEntries = (filters = {}) => apiClient.get('/time-entries', { params: filters });
+export const updateTimeEntry = (timeEntryId, entryData) => apiClient.put(`/time-entries/${timeEntryId}`, entryData);
+export const deleteTimeEntry = (timeEntryId) => apiClient.delete(`/time-entries/${timeEntryId}`);
 export const addManualTimeEntry = (entryData) => apiClient.post('/time-entries', entryData);
 
 // Clients
 export const getClients = () => apiClient.get('/clients');
+export const getActiveClients = () => apiClient.get('/clients/active');
 export const getClientDetails = (clientId) => apiClient.get(`/clients/${clientId}`);
 
 // Projects
 export const getProjects = () => apiClient.get('/projects');
+export const getActiveProjects = () => apiClient.get('/projects/active');
 export const getProjectDetails = (projectId) => apiClient.get(`/projects/${projectId}`);
+export const updateProject = (projectId, projectData) => apiClient.put(`/projects/${projectId}`, projectData);
 
 // Tasks
 export const getTasks = (filters = {}) => apiClient.get('/tasks', { params: filters });

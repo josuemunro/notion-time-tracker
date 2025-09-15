@@ -29,12 +29,16 @@ function init() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             notionId TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
+            status TEXT, -- Stage/Status from Notion (e.g., 'Active', 'Done', etc.)
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP
           )
         `, (err) => {
           if (err) return reject(err);
           console.log('Clients table created or already exists.');
+
+          // Add status column if it doesn't exist (for existing tables)
+          db.run(`ALTER TABLE Clients ADD COLUMN status TEXT`, () => { });
         });
 
         // Projects Table
@@ -47,6 +51,8 @@ function init() {
             notionClientId TEXT, -- Storing Notion ID for relation
             budgetedTime REAL DEFAULT 0, -- in hours
             status TEXT, -- e.g., 'To Do', 'In Progress', 'Done' (from Notion)
+            iconType TEXT, -- 'emoji', 'external', 'file'
+            iconValue TEXT, -- The emoji character or URL
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (clientId) REFERENCES Clients(id) ON DELETE SET NULL
@@ -54,6 +60,11 @@ function init() {
         `, (err) => {
           if (err) return reject(err);
           console.log('Projects table created or already exists.');
+
+          // Add icon columns if they don't exist (for existing tables)
+          db.run(`ALTER TABLE Projects ADD COLUMN iconType TEXT`, () => { });
+          db.run(`ALTER TABLE Projects ADD COLUMN iconValue TEXT`, () => { });
+          db.run(`ALTER TABLE Projects ADD COLUMN color TEXT`, () => { });
         });
 
         // Tasks Table
@@ -73,6 +84,9 @@ function init() {
         `, (err) => {
           if (err) return reject(err);
           console.log('Tasks table created or already exists.');
+
+          // Add assignee column if it doesn't exist (for existing tables)
+          db.run(`ALTER TABLE Tasks ADD COLUMN assignee TEXT`, () => { });
         });
 
         // TimeEntries Table
