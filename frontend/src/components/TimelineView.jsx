@@ -28,6 +28,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
   const [dragTooltip, setDragTooltip] = useState(null); // { x, y, time }
   const [deletedEntry, setDeletedEntry] = useState(null); // Store deleted entry for undo
   const [undoTimeout, setUndoTimeout] = useState(null);
+  const [hasDragged, setHasDragged] = useState(false); // Track if user has dragged
   const timelineRef = useRef(null);
 
   // Timeline constants
@@ -145,26 +146,34 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
   // Handle mouse down for dragging
   const handleMouseDown = (e, entryId, handle) => {
     e.preventDefault();
+    e.stopPropagation(); // Prevent entry click
     const entry = timeEntries.find(te => te.timeEntryId === entryId);
     if (!entry) return;
 
-    setDragState({
+    setHasDragged(false); // Reset drag flag
+
+    const dragStartData = {
       entryId,
       handle, // 'start' or 'end'
       startX: e.clientX,
       originalEntry: { ...entry }
-    });
+    };
 
-    const handleMouseMove = (e) => {
-      const currentDragState = dragState; // Capture current state
-      if (!currentDragState) return;
-      const deltaX = e.clientX - currentDragState.startX;
+    setDragState(dragStartData);
+
+    const handleMouseMove = (moveEvent) => {
+      const deltaX = moveEvent.clientX - dragStartData.startX;
+
+      // Mark as dragged if moved more than 3 pixels
+      if (Math.abs(deltaX) > 3) {
+        setHasDragged(true);
+      }
 
       let newPixels;
       if (handle === 'start') {
-        newPixels = timeToPixels(currentDragState.originalEntry.startTime) + deltaX;
+        newPixels = timeToPixels(dragStartData.originalEntry.startTime) + deltaX;
       } else {
-        newPixels = timeToPixels(currentDragState.originalEntry.endTime) + deltaX;
+        newPixels = timeToPixels(dragStartData.originalEntry.endTime) + deltaX;
       }
 
       // Ensure within timeline bounds
@@ -177,8 +186,8 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
       const timelineRect = timelineRef.current?.getBoundingClientRect();
       if (timelineRect) {
         setDragTooltip({
-          x: e.clientX,
-          y: e.clientY - 40,
+          x: moveEvent.clientX,
+          y: moveEvent.clientY - 40,
           time: new Date(newTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         });
       }
@@ -215,29 +224,25 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
     };
 
     const handleMouseUp = async () => {
-      const currentDragState = dragState; // Capture current state
-      if (currentDragState) {
-        // Save to backend
-        const entry = timeEntries.find(te => te.timeEntryId === entryId);
-        if (entry) {
-          try {
-            await updateTimeEntry(entryId, {
-              startTime: entry.startTime,
-              endTime: entry.endTime,
-              duration: entry.duration
-            });
-          } catch (error) {
-            console.error('Failed to update time entry:', error);
-            // Revert on error
-            setTimeEntries(prev => prev.map(te =>
-              te.timeEntryId === entryId ? currentDragState.originalEntry : te
-            ));
-          }
+      // Save to backend
+      const entry = timeEntries.find(te => te.timeEntryId === entryId);
+      if (entry && dragStartData) {
+        try {
+          await updateTimeEntry(entryId, {
+            startTime: entry.startTime,
+            endTime: entry.endTime,
+            duration: entry.duration
+          });
+        } catch (error) {
+          console.error('Failed to update time entry:', error);
+          // Revert on error
+          setTimeEntries(prev => prev.map(te =>
+            te.timeEntryId === entryId ? dragStartData.originalEntry : te
+          ));
         }
-        setDragState(null);
       }
 
-      // Clear tooltip
+      setDragState(null);
       setDragTooltip(null);
 
       document.removeEventListener('mousemove', handleMouseMove);
@@ -275,6 +280,13 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
     const handleEntryClick = (e) => {
       e.stopPropagation();
+
+      // Don't trigger delete mode if we just finished dragging
+      if (hasDragged) {
+        setHasDragged(false);
+        return;
+      }
+
       if (isInDeleteMode) {
         // Handle delete
         handleDelete(entry);
@@ -305,21 +317,19 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
       >
         {/* Start drag area */}
         <div
-          className="absolute left-0 top-0 bottom-0 w-3 cursor-col-resize opacity-0 hover:opacity-100 transition-opacity"
-          style={{ borderLeft: '4px solid black' }}
+          className="absolute left-0 top-0 bottom-0 w-4 cursor-col-resize"
           onMouseDown={(e) => handleDragAreaMouseDown(e, 'start')}
-          onMouseEnter={(e) => e.target.style.borderLeftColor = 'black'}
-          onMouseLeave={(e) => e.target.style.borderLeftColor = 'transparent'}
-        />
+        >
+          <div className="absolute left-0 top-0 bottom-0 w-1 bg-black opacity-0 hover:opacity-100 transition-opacity" />
+        </div>
 
         {/* End drag area */}
         <div
-          className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize opacity-0 hover:opacity-100 transition-opacity"
-          style={{ borderRight: '4px solid black' }}
+          className="absolute right-0 top-0 bottom-0 w-4 cursor-col-resize"
           onMouseDown={(e) => handleDragAreaMouseDown(e, 'end')}
-          onMouseEnter={(e) => e.target.style.borderRightColor = 'black'}
-          onMouseLeave={(e) => e.target.style.borderRightColor = 'transparent'}
-        />
+        >
+          <div className="absolute right-0 top-0 bottom-0 w-1 bg-black opacity-0 hover:opacity-100 transition-opacity" />
+        </div>
 
         {/* Content based on width */}
         <div className={`p-2 h-full flex items-center ${textColor}`}>

@@ -20,6 +20,9 @@ router.get('/', async (req, res, next) => {
       p.id AS projectId,
       p.name AS projectName,
       p.notionId AS projectNotionId,
+      p.iconType AS projectIconType,
+      p.iconValue AS projectIconValue,
+      p.color AS projectColor,
       c.id AS clientId,
       c.name AS clientName,
       c.notionId AS clientNotionId,
@@ -47,7 +50,7 @@ router.get('/', async (req, res, next) => {
   }
 
   query += `
-    GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.assignee, t.createdAt, t.updatedAt, p.id, p.name, p.notionId, c.id, c.name, c.notionId
+    GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.assignee, t.createdAt, t.updatedAt, p.id, p.name, p.notionId, p.iconType, p.iconValue, p.color, c.id, c.name, c.notionId
     ORDER BY p.name COLLATE NOCASE, t.name COLLATE NOCASE;
   `;
 
@@ -70,6 +73,9 @@ router.get('/in-progress', async (req, res, next) => {
         p.id AS projectId,
         p.name AS projectName,
         p.notionId AS projectNotionId,
+        p.iconType AS projectIconType,
+        p.iconValue AS projectIconValue,
+        p.color AS projectColor,
         t.id AS taskId,
         t.notionId AS taskNotionId,
         t.name AS taskName,
@@ -89,12 +95,15 @@ router.get('/in-progress', async (req, res, next) => {
     db.all(query, [], (err, rows) => {
       if (err) return next(err);
       const groupedByProject = rows.reduce((acc, row) => {
-        const { projectId, projectName, projectNotionId, ...taskData } = row;
+        const { projectId, projectName, projectNotionId, projectIconType, projectIconValue, projectColor, ...taskData } = row;
         if (!acc[projectId]) {
           acc[projectId] = {
             projectId,
             projectName,
             projectNotionId,
+            projectIconType,
+            projectIconValue,
+            projectColor,
             tasks: [],
           };
         }

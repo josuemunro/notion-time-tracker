@@ -124,8 +124,26 @@ function ProjectDetailPage() {
                 value={project.color || '#6366f1'}
                 onChange={(e) => {
                   const value = e.target.value;
-                  if (/^#[0-9A-Fa-f]{0,6}$/.test(value)) {
-                    if (value.length === 7) {
+                  // Allow partial typing and validate on blur or when complete
+                  if (/^#[0-9A-Fa-f]{0,6}$/.test(value) || value === '#') {
+                    // Update local state immediately for typing experience
+                    setProject(prev => ({ ...prev, color: value }));
+                  }
+                }}
+                onBlur={(e) => {
+                  const value = e.target.value;
+                  // Only send to backend if it's a valid complete hex color
+                  if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+                    handleColorChange(value);
+                  } else {
+                    // Revert to original color if invalid
+                    setProject(prev => ({ ...prev, color: project.color || '#6366f1' }));
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const value = e.target.value;
+                    if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
                       handleColorChange(value);
                     }
                   }

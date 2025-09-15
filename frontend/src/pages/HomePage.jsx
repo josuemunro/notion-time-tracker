@@ -134,6 +134,9 @@ function HomePage() {
                     id: task.id || task.taskId,
                     name: task.name || task.taskName,
                     projectName: projectGroup.projectName,
+                    projectIconType: projectGroup.projectIconType,
+                    projectIconValue: projectGroup.projectIconValue,
+                    projectColor: projectGroup.projectColor,
                     status: task.status || task.taskStatus,
                     totalHoursSpent: task.totalHoursSpent, // Ensure this is passed from the API data
                   }}
