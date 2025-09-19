@@ -120,9 +120,12 @@ function getIconValue(page) {
         value: page.icon.external.url
       };
     } else if (page.icon.type === 'file') {
+      // Note: Notion file URLs expire after ~1 hour, so we store the URL but
+      // should handle the case where it might be expired when fetched
       return {
         type: 'file',
-        value: page.icon.file.url
+        value: page.icon.file.url,
+        expiryTime: page.icon.file.expiry_time
       };
     }
   }
@@ -195,6 +198,7 @@ async function fetchNotionProjects() {
       status: getStatusValue(page.properties['Status']) || getSelectValue(page.properties['Status']),
       iconType: icon ? icon.type : null,
       iconValue: icon ? icon.value : null,
+      color: getSelectValue(page.properties['Color']) || null, // Extract color if available
       lastEditedTime: page.last_edited_time,
     };
   });
@@ -207,23 +211,32 @@ async function fetchNotionTasks() {
   }
   console.log('Fetching tasks from Notion...');
 
-  // Create filter to only fetch tasks assigned to "Josue Munro"
-  const filter = {
-    or: [
-      {
-        property: 'Assign',
-        people: {
-          contains: process.env.NOTION_USER_ID || 'Josue Munro'
+  // Create filter - only use user filter if NOTION_USER_ID is provided and looks like a UUID
+  let filter = undefined;
+  const userId = process.env.NOTION_USER_ID;
+
+  if (userId && userId.length > 20 && userId.includes('-')) {
+    // Looks like a valid UUID, apply user filter
+    filter = {
+      or: [
+        {
+          property: 'Assign',
+          people: {
+            contains: userId
+          }
+        },
+        {
+          property: 'Assign',
+          people: {
+            is_empty: true
+          }
         }
-      },
-      {
-        property: 'Assign',
-        people: {
-          is_empty: true
-        }
-      }
-    ]
-  };
+      ]
+    };
+    console.log('Applying user filter for:', userId);
+  } else {
+    console.log('No valid NOTION_USER_ID provided, fetching all tasks');
+  }
 
   const pages = await queryNotionDatabase(NOTION_TASKS_DB_ID, filter);
   return pages.map(page => ({
@@ -234,7 +247,13 @@ async function fetchNotionTasks() {
     isBillable: getCheckboxValue(page.properties['Is Billable']),
     assignee: getPeopleValue(page.properties['Assign']),
     lastEditedTime: page.last_edited_time,
-  })).filter(task => !task.assignee || task.assignee.includes('Josue Munro'));
+  })).filter(task => {
+    // Only filter by assignee if we have a valid user ID, otherwise return all tasks
+    if (userId && userId.length > 20 && userId.includes('-')) {
+      return !task.assignee || task.assignee.includes('Josue Munro');
+    }
+    return true; // Return all tasks if no user filter
+  });
 }
 
 // --- Syncing Data from Notion to Local SQLite DB (Remains the same logic) ---
@@ -287,8 +306,8 @@ async function syncProjectsWithDb() {
   return new Promise((resolve, reject) => {
     localDb.serialize(() => {
       const stmt = localDb.prepare(`
-        INSERT INTO Projects (notionId, name, notionClientId, budgetedTime, status, iconType, iconValue, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO Projects (notionId, name, notionClientId, budgetedTime, status, iconType, iconValue, color, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(notionId) DO UPDATE SET
           name = excluded.name,
           notionClientId = excluded.notionClientId,
@@ -296,6 +315,7 @@ async function syncProjectsWithDb() {
           status = excluded.status,
           iconType = excluded.iconType,
           iconValue = excluded.iconValue,
+          color = excluded.color,
           updatedAt = excluded.updatedAt;
       `);
       let completed = 0;
@@ -308,6 +328,7 @@ async function syncProjectsWithDb() {
           proj.status,
           proj.iconType,
           proj.iconValue,
+          proj.color || null,
           proj.lastEditedTime,
           (err) => {
             if (err) console.error('Error syncing project to DB:', proj.notionId, err.message);

@@ -1,5 +1,5 @@
 const sqlite3 = require('sqlite3').verbose();
-const DB_PATH = process.env.DATABASE_PATH || './notion_time_tracker.sqlite';
+const DB_PATH = process.env.DATABASE_PATH || '../data/notion_time_tracker.sqlite';
 
 let db;
 
@@ -50,6 +50,7 @@ function init() {
             clientId INTEGER,
             notionClientId TEXT, -- Storing Notion ID for relation
             budgetedTime REAL DEFAULT 0, -- in hours
+            hourlyRate REAL DEFAULT 0, -- hourly rate for billing
             status TEXT, -- e.g., 'To Do', 'In Progress', 'Done' (from Notion)
             iconType TEXT, -- 'emoji', 'external', 'file'
             iconValue TEXT, -- The emoji character or URL
@@ -65,6 +66,7 @@ function init() {
           db.run(`ALTER TABLE Projects ADD COLUMN iconType TEXT`, () => { });
           db.run(`ALTER TABLE Projects ADD COLUMN iconValue TEXT`, () => { });
           db.run(`ALTER TABLE Projects ADD COLUMN color TEXT`, () => { });
+          db.run(`ALTER TABLE Projects ADD COLUMN hourlyRate REAL DEFAULT 0`, () => { });
         });
 
         // Tasks Table
@@ -77,6 +79,7 @@ function init() {
             notionProjectId TEXT, -- Storing Notion ID for relation
             status TEXT, -- e.g., 'To Do', 'In Progress', 'Done' (from Notion)
             isBillable BOOLEAN DEFAULT true,
+            beenBilled BOOLEAN DEFAULT false,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (projectId) REFERENCES Projects(id) ON DELETE SET NULL
@@ -87,6 +90,8 @@ function init() {
 
           // Add assignee column if it doesn't exist (for existing tables)
           db.run(`ALTER TABLE Tasks ADD COLUMN assignee TEXT`, () => { });
+          // Add beenBilled column if it doesn't exist (for existing tables)
+          db.run(`ALTER TABLE Tasks ADD COLUMN beenBilled BOOLEAN DEFAULT false`, () => { });
         });
 
         // TimeEntries Table

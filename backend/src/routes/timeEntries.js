@@ -59,16 +59,23 @@ router.post('/start', async (req, res, next) => {
         });
 
         if (activeTimer) {
-          const now = new Date().toISOString();
+          // Convert current time to New Zealand timezone for storage
+          const now = new Date();
+          // New Zealand is UTC+12 (or UTC+13 during daylight saving)
+          // Get the actual offset for NZ
+          const nzOffset = 12 * 60; // Start with 12 hours in minutes
+          const nzTime = new Date(now.getTime() + (nzOffset * 60000));
+          const nzTimestamp = nzTime.toISOString();
+
           const durationQuery = "SELECT (strftime('%s', ?) - strftime('%s', startTime)) FROM TimeEntries WHERE id = ?;";
           const durationResult = await new Promise((resolve, reject) => {
-            db.get(durationQuery, [now, activeTimer.id], (err, row) => err ? reject(err) : resolve(row));
+            db.get(durationQuery, [nzTimestamp, activeTimer.id], (err, row) => err ? reject(err) : resolve(row));
           });
           const durationSeconds = durationResult ? Object.values(durationResult)[0] : 0;
 
           const stopQuery = "UPDATE TimeEntries SET endTime = ?, duration = ? WHERE id = ?;";
           await new Promise((resolve, reject) => {
-            db.run(stopQuery, [now, durationSeconds, activeTimer.id], function (err) { err ? reject(err) : resolve(this); });
+            db.run(stopQuery, [nzTimestamp, durationSeconds, activeTimer.id], function (err) { err ? reject(err) : resolve(this); });
           });
           console.log(`Timer ${activeTimer.id} stopped due to new timer start.`);
         }
@@ -82,7 +89,12 @@ router.post('/start', async (req, res, next) => {
           return res.status(404).json({ message: 'Task not found.' });
         }
 
-        const startTime = new Date().toISOString();
+        // Convert current time to New Zealand timezone for storage
+        const now = new Date();
+        // New Zealand is UTC+12 (or UTC+13 during daylight saving)
+        const nzOffset = 12 * 60; // 12 hours in minutes
+        const nzTime = new Date(now.getTime() + (nzOffset * 60000));
+        const startTime = nzTime.toISOString();
         const insertQuery = "INSERT INTO TimeEntries (taskId, notionTaskId, startTime) VALUES (?, ?, ?);";
         const result = await new Promise((resolve, reject) => {
           db.run(insertQuery, [taskId, task.notionId, startTime], function (err) { err ? reject(err) : resolve(this); });
@@ -118,11 +130,58 @@ router.post('/start', async (req, res, next) => {
   }
 });
 
+// POST /api/time-entries - Create a manual time entry
+router.post('/', (req, res, next) => {
+  const db = database.getDb();
+  const { taskId, startTime, endTime, duration } = req.body;
+
+  if (!taskId || !startTime || !endTime) {
+    return res.status(400).json({ message: 'taskId, startTime, and endTime are required.' });
+  }
+
+  try {
+    // Verify the task exists and get its notionId
+    db.get("SELECT notionId FROM Tasks WHERE id = ?", [taskId], (err, task) => {
+      if (err) return next(err);
+      if (!task) {
+        return res.status(404).json({ message: 'Task not found.' });
+      }
+
+      // Calculate duration if not provided
+      const calculatedDuration = duration || Math.floor((new Date(endTime) - new Date(startTime)) / 1000);
+
+      const insertQuery = "INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration) VALUES (?, ?, ?, ?, ?)";
+      db.run(insertQuery, [taskId, task.notionId, startTime, endTime, calculatedDuration], function (err) {
+        if (err) return next(err);
+
+        console.log('Manual time entry created - ID:', this.lastID, 'Duration:', calculatedDuration, 'seconds');
+        res.status(201).json({
+          message: 'Time entry created successfully.',
+          timeEntryId: this.lastID,
+          taskId: taskId,
+          taskNotionId: task.notionId,
+          startTime: startTime,
+          endTime: endTime,
+          duration: calculatedDuration
+        });
+      });
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // POST /api/time-entries/:timeEntryId/stop - Stop a specific timer
 router.post('/:timeEntryId/stop', (req, res, next) => {
-  const db = database.getDb(); // Get db instance inside the handler
+  const db = database.getDb();
   const { timeEntryId } = req.params;
-  const endTime = new Date().toISOString();
+
+  // Convert current time to New Zealand timezone for storage
+  const now = new Date();
+  // New Zealand is UTC+12 (or UTC+13 during daylight saving)
+  const nzOffset = 12 * 60; // 12 hours in minutes
+  const nzTime = new Date(now.getTime() + (nzOffset * 60000));
+  const endTime = nzTime.toISOString();
 
   try {
     db.get("SELECT startTime FROM TimeEntries WHERE id = ? AND endTime IS NULL", [timeEntryId], (err, entry) => {
@@ -148,6 +207,67 @@ router.post('/:timeEntryId/stop', (req, res, next) => {
             duration: durationSeconds
           });
         });
+      });
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/time-entries/:timeEntryId - Update a time entry
+router.put('/:timeEntryId', (req, res, next) => {
+  const db = database.getDb();
+  const { timeEntryId } = req.params;
+  const { startTime, endTime, duration } = req.body;
+
+  if (!startTime || !endTime) {
+    return res.status(400).json({ message: 'startTime and endTime are required.' });
+  }
+
+  try {
+    // Calculate duration if not provided
+    const calculatedDuration = duration || Math.floor((new Date(endTime) - new Date(startTime)) / 1000);
+
+    const updateQuery = "UPDATE TimeEntries SET startTime = ?, endTime = ?, duration = ? WHERE id = ?";
+    db.run(updateQuery, [startTime, endTime, calculatedDuration, timeEntryId], function (err) {
+      if (err) return next(err);
+
+      if (this.changes === 0) {
+        return res.status(404).json({ message: 'Time entry not found.' });
+      }
+
+      console.log('Time entry updated - ID:', timeEntryId, 'Duration:', calculatedDuration, 'seconds');
+      res.json({
+        message: 'Time entry updated successfully.',
+        timeEntryId: timeEntryId,
+        startTime: startTime,
+        endTime: endTime,
+        duration: calculatedDuration
+      });
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// DELETE /api/time-entries/:timeEntryId - Delete a time entry
+router.delete('/:timeEntryId', (req, res, next) => {
+  const db = database.getDb();
+  const { timeEntryId } = req.params;
+
+  try {
+    const deleteQuery = "DELETE FROM TimeEntries WHERE id = ?";
+    db.run(deleteQuery, [timeEntryId], function (err) {
+      if (err) return next(err);
+
+      if (this.changes === 0) {
+        return res.status(404).json({ message: 'Time entry not found.' });
+      }
+
+      console.log('Time entry deleted - ID:', timeEntryId);
+      res.json({
+        message: 'Time entry deleted successfully.',
+        timeEntryId: timeEntryId
       });
     });
   } catch (error) {
@@ -238,171 +358,6 @@ router.get('/', (req, res, next) => {
       if (err) return next(err);
       console.log('Time Entries API - Results:', rows);
       res.json(rows);
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// PUT /api/time-entries/:timeEntryId - Update a time entry
-router.put('/:timeEntryId', (req, res, next) => {
-  const db = database.getDb();
-  const { timeEntryId } = req.params;
-  const { startTime, endTime, duration } = req.body;
-
-  if (!startTime) {
-    return res.status(400).json({ message: 'startTime is required.' });
-  }
-
-  let calculatedEndTime = endTime;
-  let calculatedDuration = duration;
-
-  try {
-    const parsedStartTime = new Date(startTime);
-    if (isNaN(parsedStartTime)) {
-      return res.status(400).json({ message: 'Invalid startTime format.' });
-    }
-
-    if (endTime) {
-      const parsedEndTime = new Date(endTime);
-      if (isNaN(parsedEndTime)) {
-        return res.status(400).json({ message: 'Invalid endTime format.' });
-      }
-      if (parsedEndTime < parsedStartTime) {
-        return res.status(400).json({ message: 'endTime cannot be before startTime.' });
-      }
-      calculatedDuration = Math.round((parsedEndTime.getTime() - parsedStartTime.getTime()) / 1000);
-      calculatedEndTime = parsedEndTime.toISOString();
-    } else if (duration) {
-      if (typeof duration !== 'number' || duration < 0) {
-        return res.status(400).json({ message: 'Invalid duration.' });
-      }
-      const endMillis = parsedStartTime.getTime() + (duration * 1000);
-      calculatedEndTime = new Date(endMillis).toISOString();
-    } else {
-      return res.status(400).json({ message: 'Either endTime or duration is required.' });
-    }
-
-    const updateQuery = `
-      UPDATE TimeEntries 
-      SET startTime = ?, endTime = ?, duration = ? 
-      WHERE id = ?
-    `;
-
-    db.run(updateQuery, [parsedStartTime.toISOString(), calculatedEndTime, calculatedDuration, timeEntryId], function (err) {
-      if (err) return next(err);
-      if (this.changes === 0) {
-        return res.status(404).json({ message: 'Time entry not found.' });
-      }
-      res.json({
-        message: 'Time entry updated successfully.',
-        timeEntryId: timeEntryId,
-        startTime: parsedStartTime.toISOString(),
-        endTime: calculatedEndTime,
-        duration: calculatedDuration
-      });
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/time-entries - Manually add a time entry
-router.post('/', (req, res, next) => {
-  const db = database.getDb(); // Get db instance inside the handler
-  const { taskId, startTime, endTime, duration } = req.body;
-
-  if (!taskId || !startTime) {
-    return res.status(400).json({ message: 'taskId and startTime are required.' });
-  }
-  if (!endTime && (duration === undefined || duration === null)) {
-    return res.status(400).json({ message: 'Either endTime or duration (in seconds) is required.' });
-  }
-
-  let calculatedEndTime = endTime;
-  let calculatedDuration = duration;
-
-  try {
-    const parsedStartTime = new Date(startTime);
-    if (isNaN(parsedStartTime)) return res.status(400).json({ message: 'Invalid startTime format.' });
-
-    if (endTime) {
-      const parsedEndTime = new Date(endTime);
-      if (isNaN(parsedEndTime)) return res.status(400).json({ message: 'Invalid endTime format.' });
-      if (parsedEndTime < parsedStartTime) return res.status(400).json({ message: 'endTime cannot be before startTime.' });
-      calculatedDuration = Math.round((parsedEndTime.getTime() - parsedStartTime.getTime()) / 1000);
-      calculatedEndTime = parsedEndTime.toISOString();
-    } else {
-      if (typeof duration !== 'number' || duration < 0) return res.status(400).json({ message: 'Invalid duration.' });
-      const endMillis = parsedStartTime.getTime() + (duration * 1000);
-      calculatedEndTime = new Date(endMillis).toISOString();
-    }
-
-    db.get("SELECT notionId FROM Tasks WHERE id = ?", [taskId], (err, task) => {
-      if (err) return next(err);
-      if (!task) return res.status(404).json({ message: 'Task not found.' });
-
-      const insertQuery = `
-            INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration)
-            VALUES (?, ?, ?, ?, ?);
-        `;
-      db.run(insertQuery, [taskId, task.notionId, parsedStartTime.toISOString(), calculatedEndTime, calculatedDuration], function (err) {
-        if (err) return next(err);
-        res.status(201).json({
-          message: 'Time entry added successfully.',
-          id: this.lastID,
-          taskId,
-          notionTaskId: task.notionId,
-          startTime: parsedStartTime.toISOString(),
-          endTime: calculatedEndTime,
-          duration: calculatedDuration
-        });
-      });
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// DEBUG: Get all time entries (no filtering)
-router.get('/debug/all', (req, res, next) => {
-  const db = database.getDb();
-  const query = `
-    SELECT
-      te.id AS timeEntryId,
-      te.startTime,
-      te.endTime,
-      te.duration,
-      t.name AS taskName
-    FROM TimeEntries te
-    LEFT JOIN Tasks t ON te.taskId = t.id
-    ORDER BY te.startTime DESC
-    LIMIT 20
-  `;
-
-  db.all(query, [], (err, rows) => {
-    if (err) return next(err);
-    console.log('DEBUG: All time entries:', rows);
-    res.json(rows);
-  });
-});
-
-// DELETE /api/time-entries/:timeEntryId - Delete a time entry
-router.delete('/:timeEntryId', (req, res, next) => {
-  const db = database.getDb();
-  const { timeEntryId } = req.params;
-
-  try {
-    const deleteQuery = 'DELETE FROM TimeEntries WHERE id = ?';
-    db.run(deleteQuery, [timeEntryId], function (err) {
-      if (err) return next(err);
-      if (this.changes === 0) {
-        return res.status(404).json({ message: 'Time entry not found.' });
-      }
-      res.json({
-        message: 'Time entry deleted successfully.',
-        timeEntryId: timeEntryId
-      });
     });
   } catch (error) {
     next(error);

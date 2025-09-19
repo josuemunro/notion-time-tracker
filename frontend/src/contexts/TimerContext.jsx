@@ -8,6 +8,16 @@ export const TimerProvider = ({ children }) => {
   const [activeTimerDetails, setActiveTimerDetails] = useState(null); // Stores { timeEntryId, taskId, taskName, projectName, startTime }
   const [elapsedTime, setElapsedTime] = useState(0); // in seconds
   const [isLoading, setIsLoading] = useState(true);
+  const [timerStopCallbacks, setTimerStopCallbacks] = useState([]); // Callbacks to call when timer stops
+
+  // Function to register callbacks for timer stop events
+  const registerTimerStopCallback = useCallback((callback) => {
+    setTimerStopCallbacks(prev => [...prev, callback]);
+    // Return unregister function
+    return () => {
+      setTimerStopCallbacks(prev => prev.filter(cb => cb !== callback));
+    };
+  }, []);
 
   const fetchCurrentActiveTimer = useCallback(async () => {
     setIsLoading(true);
@@ -98,7 +108,15 @@ export const TimerProvider = ({ children }) => {
       await apiStopTimer(activeTimerDetails.timeEntryId);
       setActiveTimerDetails(null);
       setElapsedTime(0);
-      // Potentially trigger a refresh of task lists or project summaries elsewhere
+
+      // Call all registered callbacks when timer stops
+      timerStopCallbacks.forEach(callback => {
+        try {
+          callback();
+        } catch (error) {
+          console.error('Error calling timer stop callback:', error);
+        }
+      });
     } catch (error) {
       console.error("Failed to stop timer:", error);
       // Optionally, refetch active timer to ensure UI consistency
@@ -120,6 +138,7 @@ export const TimerProvider = ({ children }) => {
       stopTimer,
       isLoadingTimer: isLoading,
       refreshActiveTimer: fetchCurrentActiveTimer,
+      registerTimerStopCallback, // Expose callback registration
     }}>
       {children}
     </TimerContext.Provider>

@@ -40,6 +40,10 @@ export const getProjects = () => apiClient.get('/projects');
 export const getActiveProjects = () => apiClient.get('/projects/active');
 export const getProjectDetails = (projectId) => apiClient.get(`/projects/${projectId}`);
 export const updateProject = (projectId, projectData) => apiClient.put(`/projects/${projectId}`, projectData);
+export const updateTasksBillingStatus = (projectId, taskIds, beenBilled) =>
+  apiClient.put(`/projects/${projectId}/tasks/billing`, { taskIds, beenBilled });
+export const createTestProject = () => apiClient.post('/projects/test');
+export const deleteProject = (projectId) => apiClient.delete(`/projects/${projectId}`);
 
 // Tasks
 export const getTasks = (filters = {}) => apiClient.get('/tasks', { params: filters });

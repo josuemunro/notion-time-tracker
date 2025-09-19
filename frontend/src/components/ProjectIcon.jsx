@@ -27,7 +27,10 @@ const ProjectIcon = ({
         src={iconValue}
         alt={`${projectName} icon`}
         className={`${className} object-cover rounded`}
-        onError={() => setImageError(true)}
+        onError={() => {
+          console.log(`🔗 Icon failed to load for ${projectName}, falling back to letter icon`);
+          setImageError(true);
+        }}
       />
     );
   }

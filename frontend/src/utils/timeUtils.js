@@ -86,4 +86,31 @@ export const formatDurationCompact = (totalSeconds) => {
   }
 
   return parts.join(' ');
+};
+
+/**
+ * Format time stored in NZ timezone for display
+ * Since we store times in NZ timezone as ISO strings, we need to extract and display them correctly
+ */
+export const formatNZTime = (isoString, options = {}) => {
+  const date = new Date(isoString);
+  // Since we're storing in NZ timezone, treat the stored time as NZ time
+  // Extract hours and minutes from the ISO string directly (they represent NZ time)
+  const hours = date.getUTCHours();
+  const minutes = date.getUTCMinutes();
+
+  if (options.format24h) {
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+  }
+
+  const period = hours >= 12 ? 'PM' : 'AM';
+  const displayHour = hours % 12 || 12;
+  return `${displayHour}:${minutes.toString().padStart(2, '0')} ${period}`;
+};
+
+/**
+ * Format time range for display
+ */
+export const formatNZTimeRange = (startTime, endTime) => {
+  return `${formatNZTime(startTime)} - ${formatNZTime(endTime)}`;
 }; 

@@ -2,6 +2,10 @@
 
 A locally hosted web application for time tracking that synchronizes with a Notion workspace.
 
+## 🤖 For AI Assistants
+
+**IMPORTANT**: If you're an AI assistant working on this project, please read [`AI_PROJECT_GUIDE.md`](./AI_PROJECT_GUIDE.md) first. It contains critical information about using Docker instead of npm commands and other project-specific guidance.
+
 ## Prerequisites
 
 * **Docker & Docker Compose:** Ensure Docker and Docker Compose are installed on your system.

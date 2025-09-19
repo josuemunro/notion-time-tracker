@@ -14,6 +14,7 @@ router.get('/', async (req, res, next) => {
       t.name,
       t.status,
       t.isBillable,
+      t.beenBilled,
       t.assignee,
       t.createdAt AS taskCreatedAt,
       t.updatedAt AS taskUpdatedAt,
@@ -50,7 +51,7 @@ router.get('/', async (req, res, next) => {
   }
 
   query += `
-    GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.assignee, t.createdAt, t.updatedAt, p.id, p.name, p.notionId, p.iconType, p.iconValue, p.color, c.id, c.name, c.notionId
+    GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.beenBilled, t.assignee, t.createdAt, t.updatedAt, p.id, p.name, p.notionId, p.iconType, p.iconValue, p.color, c.id, c.name, c.notionId
     ORDER BY p.name COLLATE NOCASE, t.name COLLATE NOCASE;
   `;
 
