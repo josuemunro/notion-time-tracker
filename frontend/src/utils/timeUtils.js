@@ -113,4 +113,25 @@ export const formatNZTime = (isoString, options = {}) => {
  */
 export const formatNZTimeRange = (startTime, endTime) => {
   return `${formatNZTime(startTime)} - ${formatNZTime(endTime)}`;
-}; 
+};
+
+/**
+ * Get current date in YYYY-MM-DD format using NZ timezone
+ */
+export const getNZDateString = (date = new Date()) => {
+  // Convert to NZ timezone using proper locale
+  const nzDate = new Date(date.toLocaleString("en-US", { timeZone: "Pacific/Auckland" }));
+  const year = nzDate.getFullYear();
+  const month = String(nzDate.getMonth() + 1).padStart(2, '0');
+  const day = String(nzDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+/**
+ * Get current time in NZ timezone as ISO string
+ */
+export const getNZTimestamp = (date = new Date()) => {
+  // Use the proper NZ timezone conversion
+  return new Date(date.toLocaleString("en-US", { timeZone: "Pacific/Auckland" })).toISOString();
+};
+

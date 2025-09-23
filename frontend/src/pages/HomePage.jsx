@@ -4,7 +4,8 @@ import { getTasksInProgress } from '../services/api';
 import TaskItem from '../components/common/TaskItem';
 import TimelineView from '../components/TimelineView';
 import DopamineTimer from '../components/DopamineTimer';
-import { PlayIcon, StopIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
+import { PlayIcon, StopIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/solid';
+import { getNZDateString } from '../utils/timeUtils';
 
 function HomePage() {
   const {
@@ -21,8 +22,28 @@ function HomePage() {
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
   const [errorTasks, setErrorTasks] = useState(null);
 
-  // Memoize today's date to prevent unnecessary re-renders of TimelineView
-  const todayDate = useMemo(() => new Date().toISOString().split('T')[0], []);
+  // State for selected date with navigation support
+  const [selectedDate, setSelectedDate] = useState(() => getNZDateString());
+
+  // Memoize today's date for comparison using NZ timezone
+  const todayDate = useMemo(() => getNZDateString(), []);
+
+  // Navigation functions
+  const navigateToDate = (direction) => {
+    setSelectedDate(prevDate => {
+      const currentDate = new Date(prevDate);
+      if (direction === 'prev') {
+        currentDate.setDate(currentDate.getDate() - 1);
+      } else {
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+      return getNZDateString(currentDate);
+    });
+  };
+
+  const goToToday = () => {
+    setSelectedDate(todayDate);
+  };
 
   const fetchInProgress = async () => {
     setIsLoadingTasks(true);
@@ -100,8 +121,51 @@ function HomePage() {
         </div>
       )}
 
-      {/* Timeline View */}
-      <TimelineView selectedDate={todayDate} />
+      {/* Timeline View with Date Navigation */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between bg-white rounded-lg shadow-sm border p-4">
+          <button
+            onClick={() => navigateToDate('prev')}
+            className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <ChevronLeftIcon className="h-5 w-5" />
+            <span>Previous Day</span>
+          </button>
+
+          <div className="flex items-center space-x-4">
+            <h2 className="text-lg font-semibold text-gray-800">
+              {new Date(selectedDate).toLocaleDateString('en-NZ', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}
+            </h2>
+            {selectedDate === todayDate ? (
+              <span className="px-3 py-1 text-sm bg-green-100 text-green-700 rounded-lg font-medium">
+                Today
+              </span>
+            ) : (
+              <button
+                onClick={goToToday}
+                className="px-3 py-1 text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg transition-colors"
+              >
+                Go to Today
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => navigateToDate('next')}
+            className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <span>Next Day</span>
+            <ChevronRightIcon className="h-5 w-5" />
+          </button>
+        </div>
+
+        <TimelineView selectedDate={selectedDate} />
+      </div>
 
       {/* In-Progress Tasks List */}
       <div>

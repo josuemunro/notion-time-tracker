@@ -44,16 +44,16 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
   // Timeline constants
   const HOUR_WIDTH = 80; // pixels per hour
-  const START_HOUR = 5; // 5 AM (expanded range)
-  const END_HOUR = 23; // 11 PM (expanded range)
-  const TIMELINE_HOURS = END_HOUR - START_HOUR;
+  const START_HOUR = 0; // 12 AM (midnight)
+  const END_HOUR = 23; // 11 PM
+  const TIMELINE_HOURS = END_HOUR - START_HOUR + 1; // Include hour 23 (11 PM to midnight)
   const SNAP_MINUTES = 5; // Snap to 5-minute increments
   const TIMELINE_HEIGHT = 120; // Height of the timeline track
   const DEFAULT_DURATION_HOURS = 1; // Default 1 hour for new entries
 
   // Console log to verify component version - only fires once per mount
   useEffect(() => {
-    console.log('🕒 TimelineView last updated @ 2025-09-19 19:40 NZ time - Restored original delete mode styling with working functionality');
+    console.log('🕒 TimelineView last updated @ 2025-09-24 10:35 NZ time - Expanded timeline to full day (12AM-11PM) and fixed date timezone issue');
   }, []);
 
   useEffect(() => {
@@ -1126,7 +1126,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
               Drag blue handles to resize • Drag entries to move • Click empty areas to create • Click entries to delete
             </p>
             <p className="text-xs text-gray-500 mt-1">
-              Found {timeEntries.length} time entries • Showing 5AM-11PM
+              Found {timeEntries.length} time entries • Showing 12AM-11PM (full day)
               {timeEntries.length === 0 && (
                 <span className="text-amber-600 font-medium"> • Start and stop a timer to see entries here</span>
               )}
