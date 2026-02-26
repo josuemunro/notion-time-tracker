@@ -66,7 +66,7 @@ router.get('/active', async (req, res, next) => {
       LEFT JOIN Clients c ON p.clientId = c.id
       LEFT JOIN Tasks t ON p.id = t.projectId
       LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
-      WHERE p.status IN ('Proposal', 'In Progress', 'Ongoing')
+      WHERE p.status IN ('Proposal', 'In progress', 'Ongoing')
       GROUP BY p.id, p.notionId, p.name, p.budgetedTime, p.status, p.iconType, p.iconValue, p.color, p.createdAt, p.updatedAt, c.id, c.name, c.notionId
       ORDER BY p.name COLLATE NOCASE;
     `;

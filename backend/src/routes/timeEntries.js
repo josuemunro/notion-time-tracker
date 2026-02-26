@@ -3,6 +3,16 @@ const express = require('express');
 const router = express.Router();
 const database = require('../database'); // Import the database module
 
+function getNZTimestamp() {
+  const now = new Date();
+  const nzStr = now.toLocaleString('en-US', { timeZone: 'Pacific/Auckland' });
+  const nzDate = new Date(nzStr);
+  return new Date(Date.UTC(
+    nzDate.getFullYear(), nzDate.getMonth(), nzDate.getDate(),
+    nzDate.getHours(), nzDate.getMinutes(), nzDate.getSeconds()
+  )).toISOString();
+}
+
 // GET /api/time-entries/active - Get the currently active time entry (if any)
 router.get('/active', (req, res, next) => {
   const db = database.getDb(); // Get db instance inside the handler
@@ -59,13 +69,7 @@ router.post('/start', async (req, res, next) => {
         });
 
         if (activeTimer) {
-          // Convert current time to New Zealand timezone for storage
-          const now = new Date();
-          // New Zealand is UTC+12 (or UTC+13 during daylight saving)
-          // Get the actual offset for NZ
-          const nzOffset = 12 * 60; // Start with 12 hours in minutes
-          const nzTime = new Date(now.getTime() + (nzOffset * 60000));
-          const nzTimestamp = nzTime.toISOString();
+          const nzTimestamp = getNZTimestamp();
 
           const durationQuery = "SELECT (strftime('%s', ?) - strftime('%s', startTime)) FROM TimeEntries WHERE id = ?;";
           const durationResult = await new Promise((resolve, reject) => {
@@ -89,12 +93,7 @@ router.post('/start', async (req, res, next) => {
           return res.status(404).json({ message: 'Task not found.' });
         }
 
-        // Convert current time to New Zealand timezone for storage
-        const now = new Date();
-        // New Zealand is UTC+12 (or UTC+13 during daylight saving)
-        const nzOffset = 12 * 60; // 12 hours in minutes
-        const nzTime = new Date(now.getTime() + (nzOffset * 60000));
-        const startTime = nzTime.toISOString();
+        const startTime = getNZTimestamp();
         const insertQuery = "INSERT INTO TimeEntries (taskId, notionTaskId, startTime) VALUES (?, ?, ?);";
         const result = await new Promise((resolve, reject) => {
           db.run(insertQuery, [taskId, task.notionId, startTime], function (err) { err ? reject(err) : resolve(this); });
@@ -176,12 +175,7 @@ router.post('/:timeEntryId/stop', (req, res, next) => {
   const db = database.getDb();
   const { timeEntryId } = req.params;
 
-  // Convert current time to New Zealand timezone for storage
-  const now = new Date();
-  // New Zealand is UTC+12 (or UTC+13 during daylight saving)
-  const nzOffset = 12 * 60; // 12 hours in minutes
-  const nzTime = new Date(now.getTime() + (nzOffset * 60000));
-  const endTime = nzTime.toISOString();
+  const endTime = getNZTimestamp();
 
   try {
     db.get("SELECT startTime FROM TimeEntries WHERE id = ? AND endTime IS NULL", [timeEntryId], (err, entry) => {

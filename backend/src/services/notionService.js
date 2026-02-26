@@ -1,6 +1,10 @@
 // notion-time-tracker/backend/src/services/notionService.js
 const { Client, APIErrorCode } = require('@notionhq/client'); // Removed ClientErrorCode as it's not used now
 const db = require('../database'); // To interact with SQLite
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 let notionClient;
 
@@ -105,6 +109,16 @@ function getPeopleValue(property) {
 }
 
 /**
+ * Helper to extract date value (start date) from a Notion property.
+ */
+function getDateValue(property) {
+  if (property && property.date && property.date.start) {
+    return property.date.start;
+  }
+  return null;
+}
+
+/**
  * Helper to extract icon value from a Notion page.
  */
 function getIconValue(page) {
@@ -130,6 +144,98 @@ function getIconValue(page) {
     }
   }
   return null;
+}
+
+/**
+ * Downloads an icon from a URL and saves it locally
+ * @param {string} iconUrl - The URL of the icon to download
+ * @param {string} projectNotionId - The Notion ID of the project (for filename)
+ * @returns {Promise<string|null>} - The local file path relative to assets, or null if failed
+ */
+async function downloadAndStoreIcon(iconUrl, projectNotionId) {
+  try {
+    const parsedUrl = new URL(iconUrl);
+    let extension = path.extname(parsedUrl.pathname) || '.png';
+
+    // Hash only the stable path (not query params which contain rotating S3 tokens)
+    const hash = crypto.createHash('md5').update(parsedUrl.pathname + projectNotionId).digest('hex');
+    const filename = `${projectNotionId}_${hash}${extension}`;
+    const assetsDir = path.join(__dirname, '../../assets/icons');
+    const filePath = path.join(assetsDir, filename);
+
+    // Skip download if icon already exists locally
+    if (fs.existsSync(filePath)) {
+      const relativePath = `icons/${filename}`;
+      console.log(`⏩ Icon already cached: ${relativePath}`);
+      return relativePath;
+    }
+
+    console.log(`📥 Downloading icon for project ${projectNotionId}...`);
+
+    const response = await axios.get(iconUrl, {
+      responseType: 'arraybuffer',
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    // Detect extension from content-type if URL didn't have one
+    if (extension === '.png') {
+      const contentType = response.headers['content-type'];
+      if (contentType) {
+        if (contentType.includes('jpg') || contentType.includes('jpeg')) extension = '.jpg';
+        else if (contentType.includes('gif')) extension = '.gif';
+        else if (contentType.includes('svg')) extension = '.svg';
+        else if (contentType.includes('webp')) extension = '.webp';
+      }
+    }
+
+    fs.writeFileSync(filePath, response.data);
+
+    const relativePath = `icons/${filename}`;
+    console.log(`✅ Icon downloaded successfully: ${relativePath}`);
+    return relativePath;
+
+  } catch (error) {
+    console.error(`❌ Failed to download icon for project ${projectNotionId}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Processes an icon value, downloading it if it's a file/external URL
+ * @param {Object} icon - Icon object with type and value
+ * @param {string} projectNotionId - The Notion ID of the project
+ * @returns {Promise<Object>} - Updated icon object with local path if applicable
+ */
+async function processProjectIcon(icon, projectNotionId) {
+  if (!icon) return null;
+
+  // For emojis, return as-is
+  if (icon.type === 'emoji') {
+    return icon;
+  }
+
+  // For external and file URLs, download and store locally
+  if ((icon.type === 'external' || icon.type === 'file') && icon.value) {
+    const localPath = await downloadAndStoreIcon(icon.value, projectNotionId);
+
+    if (localPath) {
+      // Return the local URL that the frontend can use
+      return {
+        type: 'local',
+        value: `/assets/${localPath}`,
+        originalUrl: icon.value // Keep original for reference
+      };
+    } else {
+      // If download failed, keep the original but mark it as potentially expired
+      console.warn(`⚠️ Keeping original icon URL for project ${projectNotionId}, but it may expire`);
+      return icon;
+    }
+  }
+
+  return icon;
 }
 
 // --- Fetching Data from Notion (Remains the same logic) ---
@@ -215,44 +321,58 @@ async function fetchNotionTasks() {
   let filter = undefined;
   const userId = process.env.NOTION_USER_ID;
 
+  const filterConditions = [];
+
+  // Only sync tasks (not pages)
+  filterConditions.push({
+    property: 'Task or Page',
+    select: { equals: 'Task' }
+  });
+
+  // Only sync tasks with a deadline
+  filterConditions.push({
+    property: 'Deadline',
+    date: { is_not_empty: true }
+  });
+
+  // Only sync active tasks (To Do or Doing)
+  filterConditions.push({
+    or: [
+      { property: 'Status', status: { equals: 'To Do' } },
+      { property: 'Status', status: { equals: 'Doing' } }
+    ]
+  });
+
   if (userId && userId.length > 20 && userId.includes('-')) {
-    // Looks like a valid UUID, apply user filter
-    filter = {
+    filterConditions.push({
       or: [
-        {
-          property: 'Assign',
-          people: {
-            contains: userId
-          }
-        },
-        {
-          property: 'Assign',
-          people: {
-            is_empty: true
-          }
-        }
+        { property: 'Assign', people: { contains: userId } },
+        { property: 'Assign', people: { is_empty: true } }
       ]
-    };
+    });
     console.log('Applying user filter for:', userId);
   } else {
     console.log('No valid NOTION_USER_ID provided, fetching all tasks');
   }
 
+  filter = filterConditions.length === 1 ? filterConditions[0] : { and: filterConditions };
+
   const pages = await queryNotionDatabase(NOTION_TASKS_DB_ID, filter);
   return pages.map(page => ({
     notionId: page.id,
-    name: getTitleValue(page.properties['Task Name']), // Assumes 'Task Name' is title
+    name: getTitleValue(page.properties['Task Name']),
     notionProjectId: getRelationId(page.properties['Project Link']),
     status: getStatusValue(page.properties['Status']) || getSelectValue(page.properties['Status']),
     isBillable: getCheckboxValue(page.properties['Is Billable']),
     assignee: getPeopleValue(page.properties['Assign']),
+    deadline: getDateValue(page.properties['Deadline']),
+    taskOrPage: getSelectValue(page.properties['Task or Page']),
     lastEditedTime: page.last_edited_time,
   })).filter(task => {
-    // Only filter by assignee if we have a valid user ID, otherwise return all tasks
     if (userId && userId.length > 20 && userId.includes('-')) {
       return !task.assignee || task.assignee.includes('Josue Munro');
     }
-    return true; // Return all tasks if no user filter
+    return true;
   });
 }
 
@@ -302,6 +422,25 @@ async function syncProjectsWithDb() {
     return;
   }
 
+  // Process icons in parallel (batches of 5 to avoid overwhelming the network)
+  console.log('🔄 Processing project icons...');
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < notionProjects.length; i += BATCH_SIZE) {
+    const batch = notionProjects.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(async (proj) => {
+      if (proj.iconType && proj.iconValue) {
+        const icon = { type: proj.iconType, value: proj.iconValue };
+        const processedIcon = await processProjectIcon(icon, proj.notionId);
+        if (processedIcon) {
+          proj.iconType = processedIcon.type;
+          proj.iconValue = processedIcon.value;
+          proj.originalIconUrl = processedIcon.originalUrl;
+        }
+      }
+    }));
+  }
+  console.log('✅ Icon processing complete');
+
   const localDb = db.getDb();
   return new Promise((resolve, reject) => {
     localDb.serialize(() => {
@@ -315,7 +454,8 @@ async function syncProjectsWithDb() {
           status = excluded.status,
           iconType = excluded.iconType,
           iconValue = excluded.iconValue,
-          color = excluded.color,
+          -- Only update color if we actually have color data from Notion (preserve local colors)
+          color = CASE WHEN excluded.color IS NOT NULL THEN excluded.color ELSE Projects.color END,
           updatedAt = excluded.updatedAt;
       `);
       let completed = 0;
@@ -359,14 +499,16 @@ async function syncTasksWithDb() {
   return new Promise((resolve, reject) => {
     localDb.serialize(() => {
       const stmt = localDb.prepare(`
-        INSERT INTO Tasks (notionId, name, notionProjectId, status, isBillable, assignee, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO Tasks (notionId, name, notionProjectId, status, isBillable, assignee, deadline, taskOrPage, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(notionId) DO UPDATE SET
           name = excluded.name,
           notionProjectId = excluded.notionProjectId,
           status = excluded.status,
           isBillable = excluded.isBillable,
           assignee = excluded.assignee,
+          deadline = excluded.deadline,
+          taskOrPage = excluded.taskOrPage,
           updatedAt = excluded.updatedAt;
       `);
       let completed = 0;
@@ -378,6 +520,8 @@ async function syncTasksWithDb() {
           task.status,
           task.isBillable,
           task.assignee,
+          task.deadline,
+          task.taskOrPage,
           task.lastEditedTime,
           (err) => {
             if (err) console.error('Error syncing task to DB:', task.notionId, err.message);

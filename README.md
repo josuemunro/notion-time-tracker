@@ -14,6 +14,30 @@ A locally hosted web application for time tracking that synchronizes with a Noti
 * **Git:** For cloning the repository.
 * **Node.js & npm:** (Optional, for local development outside Docker or for running utility scripts if any are Node-based). It's recommended to use the versions specified in `backend/Dockerfile` (Node 18).
 
+## Quick Start (Docker Compose)
+
+**Before running:** Ensure [Docker Desktop](https://www.docker.com/products/docker-desktop/) is **installed and running**. The Docker daemon must be active.
+
+1.  **Configure Environment:**
+    ```bash
+    cp .env.example .env
+    # Edit .env with your Notion API key and database IDs
+    ```
+
+2.  **Build and run both backend + frontend:**
+    ```bash
+    docker compose up --build -d
+    ```
+
+3.  **Open the app:** Frontend at [http://localhost:3000](http://localhost:3000), Backend API at [http://localhost:3001](http://localhost:3001)
+
+4.  **Stop when done:**
+    ```bash
+    docker compose down
+    ```
+
+---
+
 ## Initial Setup (Part 1 - Backend Only)
 
 1.  **Clone the Repository (If you haven't already):**
@@ -67,6 +91,14 @@ A locally hosted web application for time tracking that synchronizes with a Noti
     docker-compose down
     ```
 
+## Troubleshooting
+
+| Error | Fix |
+|-------|-----|
+| `The system cannot find the file specified` / `open //./pipe/dockerDesktopLinuxEngine` | **Docker Desktop is not running.** Start Docker Desktop and wait for it to fully initialize, then run `docker compose up` again. |
+| `Cannot find module` or build errors | Run `docker compose build --no-cache` to force a clean rebuild. |
+| Port already in use | Change `BACKEND_PORT` or `FRONTEND_PORT` in `.env`, or stop the process using the port. |
+
 ---
 
-*(This README will be significantly expanded with frontend setup, full application start/stop scripts, Notion configuration details with screenshots, and troubleshooting.)*
+*(This README will be significantly expanded with frontend setup, full application start/stop scripts, Notion configuration details with screenshots.)*

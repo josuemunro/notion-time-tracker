@@ -2,6 +2,7 @@
 require('dotenv').config({ path: '../.env' });
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const db = require('./database');
 const notionService = require('./services/notionService');
 const apiRoutes = require('./routes/index'); // Import the main API router
@@ -12,6 +13,9 @@ const PORT = process.env.BACKEND_PORT || 3001;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve downloaded project icons
+app.use('/assets', express.static(path.join(__dirname, '../assets')));
 
 app.get('/', (req, res) => {
   res.send('Notion Time Tracker Backend is running!');

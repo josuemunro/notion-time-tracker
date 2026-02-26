@@ -90,6 +90,8 @@ router.get('/in-progress', async (req, res, next) => {
       WHERE (t.status IN ('Doing', 'To Do') OR
             EXISTS (SELECT 1 FROM TimeEntries te_check WHERE te_check.taskId = t.id AND te_check.endTime IS NULL))
             AND (t.assignee IS NULL OR t.assignee LIKE '%Josue Munro%')
+            AND t.deadline IS NOT NULL
+            AND (t.taskOrPage = 'Task' OR t.taskOrPage IS NULL)
       GROUP BY t.id, p.id -- Group by task and project attributes to sum time per task
       ORDER BY p.name COLLATE NOCASE, t.name COLLATE NOCASE;
     `;

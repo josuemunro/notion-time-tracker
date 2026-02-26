@@ -128,10 +128,24 @@ export const getNZDateString = (date = new Date()) => {
 };
 
 /**
- * Get current time in NZ timezone as ISO string
+ * Get current time in NZ timezone as ISO string (NZ local time stored as UTC)
  */
 export const getNZTimestamp = (date = new Date()) => {
-  // Use the proper NZ timezone conversion
-  return new Date(date.toLocaleString("en-US", { timeZone: "Pacific/Auckland" })).toISOString();
+  const nzStr = date.toLocaleString("en-US", { timeZone: "Pacific/Auckland" });
+  const nzDate = new Date(nzStr);
+  return new Date(Date.UTC(
+    nzDate.getFullYear(), nzDate.getMonth(), nzDate.getDate(),
+    nzDate.getHours(), nzDate.getMinutes(), nzDate.getSeconds()
+  )).toISOString();
+};
+
+/**
+ * Get current NZ hours as a decimal for timeline positioning
+ */
+export const getNZHoursDecimal = () => {
+  const now = new Date();
+  const nzStr = now.toLocaleString("en-US", { timeZone: "Pacific/Auckland" });
+  const nzDate = new Date(nzStr);
+  return nzDate.getHours() + nzDate.getMinutes() / 60 + nzDate.getSeconds() / 3600;
 };
 

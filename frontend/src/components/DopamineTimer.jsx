@@ -84,39 +84,47 @@ const DopamineTimer = () => {
     return xp;
   };
 
-  // Update streak and XP when timer stops
+  // Track session time while running
   useEffect(() => {
-    if (!isRunning && lastSessionTime > 0 && elapsedTime === 0) {
-      // Timer was stopped, calculate rewards
-      const sessionTime = lastSessionTime;
-
-      if (sessionTime >= 300) { // At least 5 minutes to count
-        const earnedXP = calculateXP(sessionTime);
-        const newTotalXP = totalXP + earnedXP;
-        const newStreak = streak + 1;
-        const newLevel = Math.floor(newTotalXP / 1000) + 1;
-
-        setTotalXP(newTotalXP);
-        setStreak(newStreak);
-
-        // Level up celebration
-        if (newLevel > level) {
-          setLevel(newLevel);
-          setShowCelebration(true);
-          setTimeout(() => setShowCelebration(false), 3000);
-        }
-
-        // Save to localStorage
-        localStorage.setItem('timer-xp', newTotalXP.toString());
-        localStorage.setItem('timer-streak', newStreak.toString());
-        localStorage.setItem('timer-level', newLevel.toString());
-      }
-    }
-
     if (isRunning && elapsedTime > 0) {
       setLastSessionTime(elapsedTime);
     }
-  }, [isRunning, elapsedTime, totalXP, streak, level, lastSessionTime]);
+  }, [isRunning, elapsedTime]);
+
+  // Award XP when timer stops (separate effect to avoid infinite loop)
+  useEffect(() => {
+    if (!isRunning && lastSessionTime > 0 && elapsedTime === 0) {
+      const sessionTime = lastSessionTime;
+      setLastSessionTime(0);
+
+      if (sessionTime >= 300) {
+        const earnedXP = calculateXP(sessionTime);
+
+        setTotalXP(prev => {
+          const newTotal = prev + earnedXP;
+          localStorage.setItem('timer-xp', newTotal.toString());
+
+          const newLevel = Math.floor(newTotal / 1000) + 1;
+          setLevel(prevLevel => {
+            if (newLevel > prevLevel) {
+              setShowCelebration(true);
+              setTimeout(() => setShowCelebration(false), 3000);
+            }
+            localStorage.setItem('timer-level', newLevel.toString());
+            return newLevel;
+          });
+
+          return newTotal;
+        });
+
+        setStreak(prev => {
+          const newStreak = prev + 1;
+          localStorage.setItem('timer-streak', newStreak.toString());
+          return newStreak;
+        });
+      }
+    }
+  }, [isRunning, elapsedTime, lastSessionTime]);
 
   // Animated progress circle
   const CircularProgress = ({ progress, size = 200, strokeWidth = 8 }) => {

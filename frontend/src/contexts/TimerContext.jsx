@@ -134,30 +134,18 @@ export const TimerProvider = ({ children }) => {
     let interval;
     if (activeTimerDetails?.startTime) {
       const calculateElapsedTime = () => {
-        // The backend stores time by converting local time to NZ time and storing as ISO
-        // So we need to do the same conversion for the current time to match
         const now = new Date();
+        // Convert current time to NZ using Intl (handles DST automatically)
+        const nzStr = now.toLocaleString('en-US', { timeZone: 'Pacific/Auckland' });
+        const nzComponents = new Date(nzStr);
+        const nzNow = new Date(Date.UTC(
+          nzComponents.getFullYear(), nzComponents.getMonth(), nzComponents.getDate(),
+          nzComponents.getHours(), nzComponents.getMinutes(), nzComponents.getSeconds()
+        ));
 
-        // Apply the same NZ offset that the backend uses (UTC+12)
-        const nzOffset = 12 * 60; // 12 hours in minutes
-        const nzNow = new Date(now.getTime() + (nzOffset * 60 * 1000));
-
-        // The start time from backend is already in the correct format (NZ time as ISO)
         const start = new Date(activeTimerDetails.startTime);
-
-        // Calculate elapsed time in seconds
         const elapsedSeconds = Math.floor((nzNow - start) / 1000);
-
-        // Ensure elapsed time is never negative (fallback protection)
-        const safeElapsedTime = Math.max(0, elapsedSeconds);
-        console.log('⏱️ Timer calculation:', {
-          localNow: now.toISOString(),
-          nzNow: nzNow.toISOString(),
-          start: start.toISOString(),
-          timeDifference: `${elapsedSeconds}s`,
-          safeElapsedTime
-        });
-        setElapsedTime(safeElapsedTime);
+        setElapsedTime(Math.max(0, elapsedSeconds));
       };
       calculateElapsedTime(); // Initial calculation
       interval = setInterval(calculateElapsedTime, 1000);

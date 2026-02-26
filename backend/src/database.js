@@ -88,10 +88,11 @@ function init() {
           if (err) return reject(err);
           console.log('Tasks table created or already exists.');
 
-          // Add assignee column if it doesn't exist (for existing tables)
+          // Add columns if they don't exist (for existing tables)
           db.run(`ALTER TABLE Tasks ADD COLUMN assignee TEXT`, () => { });
-          // Add beenBilled column if it doesn't exist (for existing tables)
           db.run(`ALTER TABLE Tasks ADD COLUMN beenBilled BOOLEAN DEFAULT false`, () => { });
+          db.run(`ALTER TABLE Tasks ADD COLUMN deadline TEXT`, () => { });
+          db.run(`ALTER TABLE Tasks ADD COLUMN taskOrPage TEXT`, () => { });
         });
 
         // TimeEntries Table

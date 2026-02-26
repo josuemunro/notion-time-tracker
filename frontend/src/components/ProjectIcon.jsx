@@ -21,7 +21,7 @@ const ProjectIcon = ({
     );
   }
 
-  if ((iconType === 'external' || iconType === 'file') && iconValue && !imageError) {
+  if ((iconType === 'external' || iconType === 'file' || iconType === 'local') && iconValue && !imageError) {
     return (
       <img
         src={iconValue}

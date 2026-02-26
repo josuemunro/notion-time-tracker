@@ -22,9 +22,9 @@ ENV NODE_ENV=development
 ENV DATABASE_PATH=/data/notion_time_tracker.sqlite
 # Other ENV vars like NOTION_API_KEY will be set via docker-compose from .env
 
-# Create a directory for the SQLite database if it doesn't exist
+# Create directories for the SQLite database and assets if they don't exist
 # and ensure the node user has permissions
-RUN mkdir -p /data && chown -R node:node /data
+RUN mkdir -p /data && mkdir -p /usr/src/app/backend/assets/icons && chown -R node:node /data && chown -R node:node /usr/src/app/backend/assets
 
 # Change to a non-root user
 USER node

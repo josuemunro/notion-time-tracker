@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getTimeEntries, updateTimeEntry, deleteTimeEntry, addManualTimeEntry } from '../services/api';
-import { formatHoursHuman, formatDurationHuman, formatNZTime, formatNZTimeRange } from '../utils/timeUtils';
+import { formatHoursHuman, formatDurationHuman, formatNZTime, formatNZTimeRange, getNZDateString, getNZHoursDecimal } from '../utils/timeUtils';
 import ProjectIcon from './ProjectIcon';
 import TaskSelectionModal from './TaskSelectionModal';
 import { useTimer } from '../contexts/TimerContext';
@@ -51,10 +51,20 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
   const TIMELINE_HEIGHT = 120; // Height of the timeline track
   const DEFAULT_DURATION_HOURS = 1; // Default 1 hour for new entries
 
-  // Console log to verify component version - only fires once per mount
+  const [currentTimePixels, setCurrentTimePixels] = useState(null);
+
+  // Update current time indicator every 30 seconds
   useEffect(() => {
-    console.log('🕒 TimelineView last updated @ 2025-09-24 10:35 NZ time - Expanded timeline to full day (12AM-11PM) and fixed date timezone issue');
-  }, []);
+    const isToday = selectedDate === getNZDateString();
+    const updateCurrentTime = () => {
+      if (!isToday) { setCurrentTimePixels(null); return; }
+      const nzHours = getNZHoursDecimal();
+      setCurrentTimePixels((nzHours - START_HOUR) * HOUR_WIDTH);
+    };
+    updateCurrentTime();
+    const interval = setInterval(updateCurrentTime, 30000);
+    return () => clearInterval(interval);
+  }, [selectedDate]);
 
   useEffect(() => {
     fetchTimeEntries();
@@ -1154,6 +1164,17 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
         >
           {/* Time labels and grid lines */}
           {generateTimeLabels()}
+
+          {/* Current time red line */}
+          {currentTimePixels !== null && currentTimePixels >= 0 && currentTimePixels <= TIMELINE_HOURS * HOUR_WIDTH && (
+            <div
+              className="absolute top-6 bottom-0 z-30 pointer-events-none"
+              style={{ left: `${currentTimePixels}px` }}
+            >
+              <div className="w-2.5 h-2.5 bg-red-500 rounded-full -ml-1" />
+              <div className="w-0.5 h-full bg-red-500 mx-auto -mt-0.5" />
+            </div>
+          )}
 
           {/* Hover preview for new entries */}
           {hoverPreview && (
