@@ -490,54 +490,79 @@ async function syncProjectsWithDb() {
 
 async function syncTasksWithDb() {
   const notionTasks = await fetchNotionTasks();
-  if (!notionTasks.length) {
-    console.log('No tasks found in Notion to sync.');
-    return;
-  }
 
   const localDb = db.getDb();
-  return new Promise((resolve, reject) => {
-    localDb.serialize(() => {
-      const stmt = localDb.prepare(`
-        INSERT INTO Tasks (notionId, name, notionProjectId, status, isBillable, assignee, deadline, taskOrPage, updatedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(notionId) DO UPDATE SET
-          name = excluded.name,
-          notionProjectId = excluded.notionProjectId,
-          status = excluded.status,
-          isBillable = excluded.isBillable,
-          assignee = excluded.assignee,
-          deadline = excluded.deadline,
-          taskOrPage = excluded.taskOrPage,
-          updatedAt = excluded.updatedAt;
-      `);
-      let completed = 0;
-      notionTasks.forEach(task => {
-        stmt.run(
-          task.notionId,
-          task.name,
-          task.notionProjectId,
-          task.status,
-          task.isBillable,
-          task.assignee,
-          task.deadline,
-          task.taskOrPage,
-          task.lastEditedTime,
-          (err) => {
-            if (err) console.error('Error syncing task to DB:', task.notionId, err.message);
-            completed++;
-            if (completed === notionTasks.length) {
-              stmt.finalize(errFinalize => {
-                if (errFinalize) reject(errFinalize); else resolve();
-              });
+  const activeNotionIds = notionTasks.map(t => t.notionId);
+
+  // Step 1: Upsert active tasks returned from Notion
+  if (notionTasks.length) {
+    await new Promise((resolve, reject) => {
+      localDb.serialize(() => {
+        const stmt = localDb.prepare(`
+          INSERT INTO Tasks (notionId, name, notionProjectId, status, isBillable, assignee, deadline, taskOrPage, updatedAt)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(notionId) DO UPDATE SET
+            name = excluded.name,
+            notionProjectId = excluded.notionProjectId,
+            status = excluded.status,
+            isBillable = excluded.isBillable,
+            assignee = excluded.assignee,
+            deadline = excluded.deadline,
+            taskOrPage = excluded.taskOrPage,
+            updatedAt = excluded.updatedAt;
+        `);
+        let completed = 0;
+        notionTasks.forEach(task => {
+          stmt.run(
+            task.notionId,
+            task.name,
+            task.notionProjectId,
+            task.status,
+            task.isBillable,
+            task.assignee,
+            task.deadline,
+            task.taskOrPage,
+            task.lastEditedTime,
+            (err) => {
+              if (err) console.error('Error syncing task to DB:', task.notionId, err.message);
+              completed++;
+              if (completed === notionTasks.length) {
+                stmt.finalize(errFinalize => {
+                  if (errFinalize) reject(errFinalize); else resolve();
+                });
+              }
             }
-          }
-        );
+          );
+        });
       });
-      if (notionTasks.length === 0) {
+    });
+  }
+
+  // Step 2: Mark locally-active tasks that Notion no longer returns as "Done".
+  // The Notion query only fetches "To Do"/"Doing" tasks, so any local task still
+  // in those statuses but absent from the results has been completed (or
+  // otherwise moved out of active status) in Notion.
+  await new Promise((resolve, reject) => {
+    const placeholders = activeNotionIds.map(() => '?').join(',');
+    const excludeClause = activeNotionIds.length
+      ? `AND notionId NOT IN (${placeholders})`
+      : '';
+
+    localDb.run(
+      `UPDATE Tasks SET status = 'Done'
+       WHERE status IN ('To Do', 'Doing') ${excludeClause}`,
+      activeNotionIds,
+      function (err) {
+        if (err) {
+          console.error('Error marking stale tasks as Done:', err.message);
+          return reject(err);
+        }
+        if (this.changes > 0) {
+          console.log(`Marked ${this.changes} stale task(s) as Done (no longer active in Notion).`);
+        }
         resolve();
       }
-    });
+    );
   });
 }
 

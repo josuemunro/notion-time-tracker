@@ -1,218 +1,309 @@
-# AI Project Guide - Notion Time Tracker
+# AI Project Guide — Notion Time Tracker
 
-## 🚨 CRITICAL: READ THIS FIRST
+## Read This First
 
-This guide contains essential information for AI assistants working on this project. **Always read this file completely before starting any development work.**
-
-## 🐳 Development Environment
-
-### **USE DOCKER - NOT npm run dev**
-
-This project runs in Docker containers. **Do NOT use `npm run dev` or `npm start` directly.**
-
-#### Starting the Development Environment:
-```bash
-# Start both frontend and backend
-docker-compose up
-
-# Start in background
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop containers
-docker-compose down
-```
-
-#### Individual Container Commands:
-```bash
-# Frontend only
-docker-compose up frontend
-
-# Backend only  
-docker-compose up backend
-```
-
-#### Rebuilding After Code Changes:
-```bash
-# Rebuild and restart (needed for most code changes)
-docker-compose up --build
-
-# Force rebuild specific service
-docker-compose build frontend
-docker-compose build backend
-```
-
-## 📁 Project Structure
-
-```
-notion-time-tracker/
-├── docker-compose.yml          # Docker orchestration
-├── frontend/                   # React + Vite frontend
-│   ├── Dockerfile
-│   ├── nginx.conf             # Production nginx config
-│   ├── src/
-│   │   ├── components/        # React components
-│   │   ├── contexts/          # React contexts (Timer, Toast)
-│   │   ├── pages/             # Page components
-│   │   └── services/api.js    # API client
-├── backend/                    # Node.js + Express backend
-│   ├── Dockerfile
-│   ├── src/
-│   │   ├── routes/            # API route handlers
-│   │   ├── services/          # Business logic (Notion sync)
-│   │   └── database.js        # SQLite database layer
-└── data/                      # SQLite database storage
-```
-
-## 🌐 Service URLs
-
-- **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:3001
-- **Frontend Dev Server** (when using Vite directly): http://localhost:3002
-
-## 🗄️ Database
-
-- **Type**: SQLite
-- **Location**: `./data/notion_time_tracker.sqlite`
-- **Schema**: Clients → Projects → Tasks → TimeEntries
-- **Initialization**: Automatic on first backend startup
-
-### Key Tables:
-- `Clients` - Client information from Notion
-- `Projects` - Projects with icons, colors, budgets
-- `Tasks` - Tasks with status and billing info
-- `TimeEntries` - Time tracking entries
-
-## 🔄 Notion Integration
-
-### Environment Variables Required:
-```env
-NOTION_API_KEY=secret_...
-NOTION_CLIENTS_DB_ID=...
-NOTION_PROJECTS_DB_ID=...
-NOTION_TASKS_DB_ID=...
-NOTION_USER_ID=...
-```
-
-### Sync Process:
-- Manual sync via `/api/sync/notion` endpoint
-- Fetches clients, projects, and tasks from Notion
-- Updates local SQLite database
-- **Note**: Notion file URLs expire after ~1 hour
-
-## 🕒 Timeline Component - Key Features
-
-### Critical Functionality:
-1. **Timer Integration**: Timeline auto-refreshes when timers stop
-2. **Drag & Drop**: Resize entries by dragging blue handles, move by dragging center
-3. **Click Interactions**: Click entries to delete, click empty areas to create
-4. **Task Selection**: Modal opens when creating new entries
-5. **Real-time Updates**: All changes persist to database immediately
-
-### Development Tracking:
-**IMPORTANT**: When making timeline updates, change the console log version string in TimelineView.jsx to a new hardcoded string (with current date/time) so we can verify changes are loaded in the browser. This log should only fire once per page load, not on every re-render.
-
-Example: `console.log("🕒 TimelineView last updated @ 2025-09-19 16:45 NZ time - Fixed hover outline issue");`
-
-### Common Issues to Avoid:
-- Don't disable pointer events on drag handles
-- Ensure proper z-index layering (handles above content)
-- Handle timezone conversions correctly for time calculations (entries should appear on selected date)
-- Include proper fallbacks for failed project icons
-- Use refs for immediate state checks in async operations (like drag detection)
-- Expand hover detection areas to account for drag handles and user precision
-
-## 📝 Development Guidelines
-
-### Code Changes:
-1. **Frontend changes**: Usually hot-reload in Docker
-2. **Backend changes**: May need container restart
-3. **Package.json changes**: Requires rebuild (`docker-compose up --build`)
-4. **Dockerfile changes**: Requires rebuild
-
-### Testing:
-```bash
-# Run backend tests (if any exist)
-docker-compose exec backend npm test
-
-# Check database
-docker-compose exec backend sqlite3 /app/data/notion_time_tracker.sqlite
-
-# View logs
-docker-compose logs backend
-docker-compose logs frontend
-```
-
-### API Testing:
-```bash
-# Test API endpoints
-curl http://localhost:3001/api/tasks
-curl http://localhost:3001/api/time-entries?date=2024-01-15
-```
-
-## 🎯 Common Tasks
-
-### Adding New Features:
-1. Update relevant components in `frontend/src/`
-2. Add/modify API routes in `backend/src/routes/`
-3. Test in Docker environment
-4. Ensure database schema supports new features
-
-### Debugging:
-1. Check Docker logs: `docker-compose logs -f`
-2. Verify database state: Connect to SQLite directly
-3. Test API endpoints: Use curl or Postman
-4. Frontend console: Browser dev tools
-
-### Database Migrations:
-- Add new columns with `ALTER TABLE` in `database.js`
-- Use `IF NOT EXISTS` for safe migrations
-- Test with fresh database in new container
-
-## 🚀 Deployment Notes
-
-- Frontend uses nginx for production serving
-- Backend serves API on port 3001
-- Database persists in Docker volume
-- All environment variables needed for Notion integration
-
-## ⚠️ Important Warnings
-
-1. **Never run `npm run dev` directly** - Use Docker
-2. **Project icons may fail after 1 hour** - This is normal (Notion URL expiry)
-3. **Always test timeline functionality** - It's the core feature
-4. **Database is file-based** - Backup `./data/` directory
-5. **Notion sync is manual** - No automatic scheduling
-
-## 🔧 Troubleshooting
-
-### Container Won't Start:
-- Check if ports 3000/3001 are available
-- Run `docker-compose down` first
-- Check Docker logs for specific errors
-
-### Database Issues:
-- Ensure `./data/` directory exists
-- Check file permissions on SQLite file
-- Verify environment variables for Notion
-
-### Timeline Not Working:
-- Check that TimerContext is properly wrapped
-- Verify API endpoints are responding
-- Ensure proper date formatting in requests
+This guide is the canonical reference for AI assistants working on this project. Read it fully before making changes. For quick-reference conventions, see `.cursor/rules/project-conventions.mdc`.
 
 ---
 
-## 📋 Quick Start Checklist for AI Assistants:
+## Architecture Overview
 
-- [ ] Read this entire guide
-- [ ] Verify Docker is running
-- [ ] Start with `docker-compose up`
-- [ ] Test both frontend (3000) and backend (3001)
-- [ ] Check that Notion env vars are set
-- [ ] Test timeline functionality first
-- [ ] Never use npm run commands directly
+| Layer | Stack | Port | Purpose |
+|-------|-------|------|---------|
+| Frontend | React 19, Vite 6, Tailwind CSS 4, React Router 7 | 3000 | SPA with time tracking UI |
+| Backend | Node.js, Express 5 | 3001 | REST API + Notion sync |
+| Database | SQLite | — | Local cache of Notion data + time entries |
+| Notion | @notionhq/client 3.x | — | Source of truth for clients, projects, tasks |
 
-**Remember**: This project's core value is the timeline functionality. Always ensure it works correctly after any changes. 
+### Directory Layout
+
+```
+notion-time-tracker/
+├── .env.example              # Required env vars
+├── docker-compose.yml        # Container orchestration
+├── AI_PROJECT_GUIDE.md       # This file
+│
+├── backend/
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── assets/icons/         # Cached project icons from Notion
+│   └── src/
+│       ├── app.js            # Express entry point
+│       ├── database.js       # SQLite schema + init
+│       ├── routes/
+│       │   ├── index.js      # Router mount point
+│       │   ├── clients.js
+│       │   ├── projects.js
+│       │   ├── tasks.js
+│       │   ├── timeEntries.js
+│       │   └── sync.js
+│       └── services/
+│           └── notionService.js  # Notion API + sync logic
+│
+└── frontend/
+    ├── Dockerfile
+    ├── nginx.conf            # Production reverse proxy
+    ├── package.json
+    └── src/
+        ├── main.jsx          # Entry: BrowserRouter → TimerProvider → App
+        ├── App.jsx           # Layout + routes
+        ├── services/api.js   # Axios client (baseURL: /api)
+        ├── contexts/
+        │   ├── TimerContext.jsx   # Active timer state, favicon, doc title
+        │   └── ToastContext.jsx   # Toast notifications + undo actions
+        ├── pages/
+        │   ├── HomePage.jsx       # Dashboard: Quick Start + Timeline
+        │   ├── ClientsPage.jsx    # Active clients grid
+        │   ├── ClientDetailPage.jsx
+        │   ├── ProjectsPage.jsx   # Active projects grid
+        │   ├── ProjectDetailPage.jsx  # Settings, billing, tasks
+        │   └── TasksPage.jsx      # All tasks list
+        ├── components/
+        │   ├── layout/Navbar.jsx
+        │   ├── common/TaskItem.jsx     # Play/stop per task
+        │   ├── DopamineTimer.jsx       # XP/level gamified timer
+        │   ├── TimelineView.jsx        # Day timeline (drag, resize, create)
+        │   ├── ProjectIcon.jsx         # Emoji / image / fallback
+        │   ├── TaskSelectionModal.jsx   # Pick task for manual entry
+        │   ├── BillingOverview.jsx      # Billed / unbilled summary
+        │   ├── UnbilledTasksSection.jsx # Select + preview billing
+        │   └── BillingModal.jsx         # Final bill with copy/undo
+        └── utils/
+            └── timeUtils.js   # Date helpers (NZ timezone)
+```
+
+---
+
+## Development Environment
+
+### Docker (production-like)
+
+```bash
+docker compose up --build        # Build + start both services
+docker compose up --build -d     # Detached
+docker compose logs -f           # Tail logs
+docker compose down              # Stop + remove
+```
+
+### Local dev (faster iteration)
+
+```bash
+# Terminal 1 — backend
+cd backend && npm run dev        # nodemon on port 3001
+
+# Terminal 2 — frontend
+cd frontend && npm run dev       # Vite on port 3000, proxies /api → :3001
+```
+
+Both approaches work. Docker is closer to production; local dev gives hot reload.
+
+---
+
+## Data Flow
+
+### Notion → Local DB (sync)
+
+```
+POST /api/sync/notion
+  → syncAllFromNotion()
+    → syncClientsWithDb()    — upsert all clients
+    → syncProjectsWithDb()   — upsert all projects + download icons
+    → syncTasksWithDb()      — upsert active tasks + mark stale tasks as Done
+    → updateLocalRelationalIds()  — resolve Notion IDs → local FK IDs
+```
+
+Sync is **manual** — triggered by the "Sync Notion" button in the Navbar or `POST /api/sync/notion`.
+
+### Task sync filter (Notion query)
+
+Only tasks matching ALL of these are fetched:
+
+| Property | Condition |
+|----------|-----------|
+| Task or Page | equals "Task" |
+| Deadline | is not empty |
+| Status | equals "To Do" OR "Doing" |
+| Assign (if `NOTION_USER_ID` set) | contains user OR is empty |
+
+Tasks that no longer match (e.g. marked "Done" in Notion) are absent from the API response. The sync marks any locally-active task not in the response as `"Done"` so they disappear from the Quick Start list.
+
+### Quick Start (home page)
+
+```
+GET /api/tasks/in-progress
+  → SQL: status IN ('Doing','To Do') OR has active timer
+         AND deadline IS NOT NULL
+         AND taskOrPage = 'Task'
+         AND assignee IS NULL or contains 'Josue Munro'
+  → grouped by project
+```
+
+### Timer flow
+
+```
+POST /api/time-entries/start   { taskId }   → creates TimeEntry with startTime, no endTime
+POST /api/time-entries/:id/stop             → sets endTime + duration
+```
+
+Active timer check: `GET /api/time-entries/active` (returns entry where endTime IS NULL).
+
+---
+
+## API Reference
+
+### Clients
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/clients` | All clients with total hours |
+| GET | `/api/clients/active` | Clients excluding Done/Completed/Archived |
+| GET | `/api/clients/:id` | Client detail + projects |
+
+### Projects
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/projects` | All projects with time + client info |
+| GET | `/api/projects/active` | Projects with status Proposal/In progress/Ongoing |
+| GET | `/api/projects/:id` | Project detail + tasks |
+| PUT | `/api/projects/:id` | Update `color` (hex) and/or `hourlyRate` |
+| PUT | `/api/projects/:id/tasks/billing` | Bulk set `beenBilled` for `taskIds[]` |
+| POST | `/api/projects/test` | Create test project + sample tasks |
+| DELETE | `/api/projects/:id` | Cascade delete project, tasks, time entries |
+
+### Tasks
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/tasks` | All tasks. Query: `?status=`, `?projectId=` |
+| GET | `/api/tasks/in-progress` | Quick Start list (grouped by project) |
+| GET | `/api/tasks/:id` | Task detail + time entries |
+
+### Time Entries
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/time-entries/active` | Currently running timer (if any) |
+| POST | `/api/time-entries/start` | Start timer. Body: `{ taskId }` |
+| POST | `/api/time-entries/:id/stop` | Stop timer |
+| POST | `/api/time-entries` | Manual entry. Body: `{ taskId, startTime, endTime }` |
+| PUT | `/api/time-entries/:id` | Update entry times |
+| DELETE | `/api/time-entries/:id` | Delete entry |
+| GET | `/api/time-entries` | List. Query: `?date=`, `?startDate=`, `?endDate=` (YYYY-MM-DD) |
+
+### Sync
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/sync/notion` | Full sync from Notion |
+| POST | `/api/sync/notion/webhook` | Handle Notion webhook |
+
+---
+
+## Database Schema
+
+```
+Clients (id, notionId, name, status)
+  └── Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color)
+        └── Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage)
+              └── TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
+```
+
+- `notionId` columns are the Notion page UUIDs, used for sync deduplication (UNIQUE constraint)
+- `notionClientId` / `notionProjectId` store the raw Notion relation IDs; `clientId` / `projectId` are resolved local FKs (updated by `updateLocalRelationalIds()` after each sync)
+- `duration` is in **seconds**
+- Timestamps are ISO 8601 strings
+
+---
+
+## Notion Database Schema Expectations
+
+The Notion integration expects these exact property names:
+
+### Clients DB
+- **Name** (title)
+- **Status** (status or select)
+
+### Projects DB
+- **Project Name** (title)
+- **Client Link** (relation → Clients)
+- **Budget (hrs)** (number)
+- **Status** (status or select)
+- **Color** (select, optional)
+- Page icon (emoji, external URL, or file)
+
+### Tasks DB
+- **Task Name** (title)
+- **Project Link** (relation → Projects)
+- **Status** (status) — expected values: "To Do", "Doing", "Done"
+- **Is Billable** (checkbox)
+- **Assign** (people)
+- **Deadline** (date)
+- **Task or Page** (select) — expected values: "Task", "Page"
+
+---
+
+## Key Design Decisions
+
+1. **Timezone**: All date logic uses `Pacific/Auckland` (NZ time). See `utils/timeUtils.js`.
+2. **Currency**: NZD with 15% GST for billing calculations.
+3. **Billing rounding**: Time is rounded up to nearest 0.25 hours.
+4. **Icon caching**: Notion file URLs expire after ~1 hour, so project icons are downloaded to `backend/assets/icons/` on sync and served statically.
+5. **No auth**: Single-user app, no authentication layer.
+6. **No auto-sync**: Sync is manual to avoid Notion rate limits.
+
+---
+
+## Common Pitfalls
+
+1. **Hardcoded assignee**: The in-progress query in `tasks.js` filters by `'%Josue Munro%'` rather than a configurable value.
+2. **Notion property names are exact-match**: If a Notion DB uses "In Progress" instead of "Doing", sync will miss those tasks.
+3. **SQLite migrations**: New columns are added with `ALTER TABLE ... ADD COLUMN` in `database.js` — these silently no-op if the column already exists.
+4. **Frontend proxy**: In dev, Vite proxies `/api` to `localhost:3001`. In Docker, nginx does the same.
+5. **Timer state**: `TimerContext` manages the active timer in React state + polls the backend. Stopping a timer re-fetches timeline data.
+
+---
+
+## Timeline Component (Core Feature)
+
+The `TimelineView` is the most complex component. Key behaviors:
+
+- **Drag handles** (blue) on top/bottom edges resize entries
+- **Drag center** moves entries
+- **Click empty area** opens `TaskSelectionModal` to create a manual entry
+- **Click existing entry** shows delete option
+- All changes persist to the backend immediately
+- Uses refs for drag state to avoid stale closures
+
+When making timeline changes, update the version log at the top of `TimelineView.jsx`:
+
+```js
+console.log("🕒 TimelineView last updated @ <date> — <description>");
+```
+
+---
+
+## Environment Variables
+
+```env
+BACKEND_PORT=3001
+FRONTEND_PORT=3000
+DATABASE_PATH=/data/notion_time_tracker.sqlite
+
+NOTION_API_KEY=secret_...
+NOTION_CLIENTS_DB_ID=<uuid>
+NOTION_PROJECTS_DB_ID=<uuid>
+NOTION_TASKS_DB_ID=<uuid>
+NOTION_USER_ID=<uuid>          # Optional — filters tasks by assignee
+```
+
+---
+
+## Quick Checklist
+
+- [ ] Read this guide fully
+- [ ] Check Docker or local dev is running
+- [ ] Verify Notion env vars are set in `.env`
+- [ ] After any sync-related changes, test with `POST /api/sync/notion`
+- [ ] After any timeline changes, test drag/resize/create/delete in the UI
+- [ ] Timestamps use NZ timezone — double-check date boundary logic

@@ -1,0 +1,39 @@
+---
+description: Core conventions for the Notion Time Tracker project
+alwaysApply: true
+---
+
+# Notion Time Tracker — Project Conventions
+
+Read `AI_PROJECT_GUIDE.md` at the project root for full architecture, API reference, and data flow documentation.
+
+## Stack
+
+- **Backend**: Node.js + Express 5, SQLite, @notionhq/client
+- **Frontend**: React 19, Vite 6, Tailwind CSS 4, React Router 7, Axios
+- **Deployment**: Docker Compose (nginx fronts the frontend in prod)
+
+## Key Conventions
+
+- Timezone is **Pacific/Auckland** (NZ). All date logic must account for this.
+- Currency is **NZD** with **15% GST**. Billing rounds time up to 0.25h increments.
+- Notion sync is manual (`POST /api/sync/notion`). Never add auto-sync without discussion.
+- The app is single-user with no auth layer.
+- SQLite migrations use `ALTER TABLE ... ADD COLUMN` with silent no-op in `database.js`.
+- Frontend proxies `/api` to the backend (Vite in dev, nginx in prod).
+
+## Sync Behaviour
+
+- Sync fetches only active tasks (Status = "To Do" or "Doing") from Notion.
+- Tasks no longer returned by Notion are marked "Done" locally so they leave the Quick Start list.
+- Notion property names are **exact-match** (e.g. "Task Name", "Project Link", "Deadline").
+
+## Timeline Component
+
+`TimelineView.jsx` is the most complex component. After changes, update the version log:
+
+```js
+console.log("🕒 TimelineView last updated @ <date> — <description>");
+```
+
+Test drag, resize, create, and delete interactions after any timeline edit.
