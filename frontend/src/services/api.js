@@ -49,5 +49,10 @@ export const deleteProject = (projectId) => apiClient.delete(`/projects/${projec
 export const getTasks = (filters = {}) => apiClient.get('/tasks', { params: filters });
 export const getTaskDetails = (taskId) => apiClient.get(`/tasks/${taskId}`);
 export const getTasksInProgress = () => apiClient.get('/tasks/in-progress');
+export const createTask = (taskData) => apiClient.post('/tasks', taskData);
+export const updateTaskStatus = (taskId, status) => apiClient.patch(`/tasks/${taskId}/status`, { status });
+
+// Projects (manual creation)
+export const createProject = (projectData) => apiClient.post('/projects', projectData);
 
 export default apiClient;

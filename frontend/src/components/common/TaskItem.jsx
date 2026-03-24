@@ -1,13 +1,10 @@
 import React from 'react';
-import { PlayIcon, StopIcon, ClockIcon } from '@heroicons/react/24/solid'; // Added ClockIcon
+import { PlayIcon, StopIcon, ClockIcon, CheckIcon } from '@heroicons/react/24/solid';
 import { useTimer } from '../../contexts/TimerContext';
 import { formatHoursHuman } from '../../utils/timeUtils';
 import ProjectIcon from '../ProjectIcon';
 
-// You'll need to install @heroicons/react: npm install @heroicons/react
-// Or use any other icon library / SVGs
-
-function TaskItem({ task, onStartOverride, onStopOverride }) {
+function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone }) {
   const { startTimer, stopTimer, activeTimerDetails, isRunning } = useTimer();
   const isThisTaskActive = isRunning && activeTimerDetails?.taskId === task.id;
 
@@ -40,13 +37,18 @@ function TaskItem({ task, onStartOverride, onStopOverride }) {
             className="w-6 h-6 mt-1 flex-shrink-0"
           />
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h4 className={`font-semibold text-lg ${isThisTaskActive ? 'text-blue-700' : 'text-gray-800'}`}>{task.name || task.taskName}</h4>
               {isThisTaskActive && (
                 <div className="flex items-center bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
                   <ClockIcon className="h-3 w-3 animate-pulse mr-1" />
                   <span className="text-xs font-medium">ACTIVE</span>
                 </div>
+              )}
+              {task.isManual && (
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                  Local
+                </span>
               )}
             </div>
             <p className="text-sm text-gray-600">
@@ -55,7 +57,16 @@ function TaskItem({ task, onStartOverride, onStopOverride }) {
             {task.status && !isThisTaskActive && <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full mt-1 inline-block">{task.status}</span>}
           </div>
         </div>
-        <div className="flex items-center ml-4 flex-shrink-0">
+        <div className="flex items-center gap-1 ml-4 flex-shrink-0">
+          {task.isManual && onMarkDone && !isThisTaskActive && (
+            <button
+              onClick={() => onMarkDone(task.id)}
+              className="p-2 rounded-full text-gray-400 hover:text-green-600 hover:bg-green-50 focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-offset-2 transition-all duration-200"
+              title="Mark as Done"
+            >
+              <CheckIcon className="h-5 w-5 sm:h-6 sm:w-6" />
+            </button>
+          )}
           {isThisTaskActive ? (
             <button
               onClick={handleStop}

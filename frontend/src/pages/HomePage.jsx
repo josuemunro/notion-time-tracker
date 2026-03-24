@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useTimer } from '../contexts/TimerContext';
-import { getTasksInProgress, getTimeEntries } from '../services/api';
+import { useToast } from '../contexts/ToastContext';
+import { getTasksInProgress, getTimeEntries, updateTaskStatus } from '../services/api';
 import TaskItem from '../components/common/TaskItem';
 import TimelineView from '../components/TimelineView';
 import DopamineTimer from '../components/DopamineTimer';
 import ProjectIcon from '../components/ProjectIcon';
-import { PlayIcon, StopIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, ListBulletIcon } from '@heroicons/react/24/solid';
+import AddTaskModal from '../components/AddTaskModal';
+import { PlayIcon, StopIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, ListBulletIcon, PlusIcon } from '@heroicons/react/24/solid';
 import { getNZDateString, formatNZTime, formatDurationHuman } from '../utils/timeUtils';
 
 function HomePage() {
@@ -18,6 +20,7 @@ function HomePage() {
     isLoadingTimer,
     refreshActiveTimer
   } = useTimer();
+  const { showSuccess, showError } = useToast();
 
   const [inProgressTasksByProject, setInProgressTasksByProject] = useState([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
@@ -25,6 +28,7 @@ function HomePage() {
   const [activeTab, setActiveTab] = useState('tasks');
   const [dayEntries, setDayEntries] = useState([]);
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
+  const [showAddTaskModal, setShowAddTaskModal] = useState(false);
 
   // State for selected date with navigation support
   const [selectedDate, setSelectedDate] = useState(() => getNZDateString());
@@ -117,6 +121,22 @@ function HomePage() {
 
   const handleStop = () => {
     stopTimer();
+  };
+
+  const handleMarkDone = async (taskId) => {
+    try {
+      await updateTaskStatus(taskId, 'Done');
+      showSuccess('Task marked as done');
+      fetchInProgress();
+    } catch (err) {
+      console.error('Failed to mark task as done:', err);
+      showError('Failed to mark task as done');
+    }
+  };
+
+  const handleTaskCreated = () => {
+    showSuccess('Task added to Quick Start');
+    fetchInProgress();
   };
 
   if (isLoadingTimer) {
@@ -219,7 +239,16 @@ function HomePage() {
               <span className="ml-1 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{dayEntries.length}</span>
             )}
           </button>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            {activeTab === 'tasks' && (
+              <button
+                onClick={() => setShowAddTaskModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add Task
+              </button>
+            )}
             <button
               onClick={() => activeTab === 'tasks' ? fetchInProgress() : fetchDayEntries()}
               disabled={isLoadingTasks || isLoadingEntries}
@@ -261,8 +290,10 @@ function HomePage() {
                         projectColor: projectGroup.projectColor,
                         status: task.status || task.taskStatus,
                         totalHoursSpent: task.totalHoursSpent,
+                        isManual: task.isManual,
                       }}
                       onStartOverride={handleQuickStart}
+                      onMarkDone={handleMarkDone}
                     />
                   ))
                 ) : (
@@ -325,6 +356,13 @@ function HomePage() {
           </>
         )}
       </div>
+
+      {/* Add Task Modal */}
+      <AddTaskModal
+        isOpen={showAddTaskModal}
+        onClose={() => setShowAddTaskModal(false)}
+        onTaskCreated={handleTaskCreated}
+      />
     </div>
   );
 }

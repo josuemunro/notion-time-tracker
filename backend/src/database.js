@@ -67,6 +67,7 @@ function init() {
           db.run(`ALTER TABLE Projects ADD COLUMN iconValue TEXT`, () => { });
           db.run(`ALTER TABLE Projects ADD COLUMN color TEXT`, () => { });
           db.run(`ALTER TABLE Projects ADD COLUMN hourlyRate REAL DEFAULT 0`, () => { });
+          db.run(`ALTER TABLE Projects ADD COLUMN isManual BOOLEAN DEFAULT false`, () => { });
         });
 
         // Tasks Table
@@ -93,6 +94,7 @@ function init() {
           db.run(`ALTER TABLE Tasks ADD COLUMN beenBilled BOOLEAN DEFAULT false`, () => { });
           db.run(`ALTER TABLE Tasks ADD COLUMN deadline TEXT`, () => { });
           db.run(`ALTER TABLE Tasks ADD COLUMN taskOrPage TEXT`, () => { });
+          db.run(`ALTER TABLE Tasks ADD COLUMN isManual BOOLEAN DEFAULT false`, () => { });
         });
 
         // TimeEntries Table

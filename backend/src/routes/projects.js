@@ -144,6 +144,50 @@ router.get('/:projectId', async (req, res, next) => {
   }
 });
 
+// POST /api/projects - Create a manual (local-only) project
+router.post('/', async (req, res, next) => {
+  const db = database.getDb();
+  const { name, color, iconEmoji } = req.body;
+
+  if (!name || !name.trim()) {
+    return res.status(400).json({ message: 'Project name is required.' });
+  }
+
+  const syntheticNotionId = `local-project-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  try {
+    const insertQuery = `
+      INSERT INTO Projects (notionId, name, status, isManual, iconType, iconValue, color)
+      VALUES (?, ?, 'In progress', 1, ?, ?, ?)
+    `;
+
+    db.run(insertQuery, [
+      syntheticNotionId,
+      name.trim(),
+      iconEmoji ? 'emoji' : null,
+      iconEmoji || null,
+      color || null
+    ], function (err) {
+      if (err) return next(err);
+      res.status(201).json({
+        message: 'Project created successfully.',
+        project: {
+          id: this.lastID,
+          notionId: syntheticNotionId,
+          name: name.trim(),
+          status: 'In progress',
+          isManual: true,
+          iconType: iconEmoji ? 'emoji' : null,
+          iconValue: iconEmoji || null,
+          color: color || null
+        }
+      });
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // PUT /api/projects/:projectId - Update a project's local properties (color, hourlyRate, etc.)
 router.put('/:projectId', async (req, res, next) => {
   const db = database.getDb();
