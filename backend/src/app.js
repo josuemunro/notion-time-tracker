@@ -3,7 +3,6 @@ require('dotenv').config({ path: '../.env' });
 const express = require('express');
 const cors = require('cors');
 const crypto = require('crypto');
-const fs = require('fs');
 const path = require('path');
 const db = require('./database');
 const notionService = require('./services/notionService');
@@ -55,17 +54,6 @@ app.use('/api', (req, res, next) => {
   const token = req.headers.authorization?.replace('Bearer ', '');
   if (token && validTokens.has(token)) return next();
   return res.status(401).json({ message: 'Unauthorized' });
-});
-
-// TEMPORARY: DB upload/download for migration (remove after data is migrated)
-app.post('/api/admin/db-upload', express.raw({ type: 'application/octet-stream', limit: '50mb' }), (req, res) => {
-  const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../data/notion_time_tracker.sqlite');
-  fs.writeFileSync(dbPath, req.body);
-  res.json({ message: 'Database replaced', size: req.body.length });
-});
-app.get('/api/admin/db-download', (req, res) => {
-  const dbPath = process.env.DATABASE_PATH || path.join(__dirname, '../data/notion_time_tracker.sqlite');
-  res.download(dbPath);
 });
 
 // Serve downloaded project icons (unprotected — loaded via img tags)
