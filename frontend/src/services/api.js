@@ -25,11 +25,11 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Redirect to login on 401
+// Redirect to login on 401 (skip if already on login page to avoid refresh loop)
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && !error.config.url?.includes('/auth/')) {
+    if (error.response?.status === 401 && !error.config.url?.includes('/auth/') && window.location.pathname !== '/login') {
       localStorage.removeItem('auth_token');
       window.location.href = '/login';
     }
