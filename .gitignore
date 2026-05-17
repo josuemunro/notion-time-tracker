@@ -20,6 +20,7 @@ docker-compose.override.yml
 
 # Frontend build
 frontend/build/
+frontend/dist/
 frontend/node_modules/
 
 # Backend data (if not mapped from a named volume)

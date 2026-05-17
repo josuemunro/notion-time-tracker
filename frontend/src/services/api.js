@@ -18,6 +18,25 @@ const apiClient = axios.create({
   },
 });
 
+// Attach auth token to every request
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth_token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// Redirect to login on 401
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && !error.config.url?.includes('/auth/')) {
+      localStorage.removeItem('auth_token');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Timer and Sync
 export const getActiveTimer = () => apiClient.get('/time-entries/active');
 export const startTimer = (taskId) => apiClient.post('/time-entries/start', { taskId });
@@ -54,5 +73,9 @@ export const updateTaskStatus = (taskId, status) => apiClient.patch(`/tasks/${ta
 
 // Projects (manual creation)
 export const createProject = (projectData) => apiClient.post('/projects', projectData);
+
+// Auth
+export const login = (password) => apiClient.post('/auth/login', { password });
+export const checkAuth = () => apiClient.get('/auth/check');
 
 export default apiClient;
