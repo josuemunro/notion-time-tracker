@@ -9,7 +9,7 @@ const notionService = require('./services/notionService');
 const apiRoutes = require('./routes/index'); // Import the main API router
 
 const app = express();
-const PORT = process.env.BACKEND_PORT || 3001;
+const PORT = process.env.PORT || process.env.BACKEND_PORT || 3001;
 
 // Auth token store (in-memory, survives until process restart)
 const validTokens = new Set();
@@ -65,7 +65,7 @@ app.use('/api', apiRoutes); // All API routes will be prefixed with /api
 // In production, serve frontend static files
 const publicPath = path.join(__dirname, '../public');
 app.use(express.static(publicPath));
-app.get('*', (req, res, next) => {
+app.get('/{*splat}', (req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/assets')) return next();
   res.sendFile(path.join(publicPath, 'index.html'));
 });
