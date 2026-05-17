@@ -80,10 +80,13 @@ Clients (id, notionId, name, status)
 
 ## Deployment
 
-- **Platform**: Railway (Docker deployment)
+- **Live URL**: https://timer.webdune.co.nz
+- **Platform**: Railway (Docker deployment, runs as root via `RAILWAY_RUN_UID=0`)
 - **CI/CD**: Auto-deploys on push to `master`
 - **Persistent volume**: Mounted at `/data` for SQLite file
+- **Port**: Railway injects `PORT` env var (used over `BACKEND_PORT`)
 - **Auth**: `APP_PASSWORD` env var — single password for the whole site
+- **DNS**: CNAME `timer.webdune.co.nz` → Railway-provided target (SSL auto-provisioned)
 
 ## Environment Variables
 
