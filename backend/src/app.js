@@ -57,6 +57,11 @@ app.use('/api', (req, res, next) => {
 });
 
 // Serve downloaded project icons (unprotected — loaded via img tags)
+// In production, icons live on the persistent volume alongside the DB
+const iconsPath = process.env.DATABASE_PATH
+  ? path.dirname(process.env.DATABASE_PATH)
+  : path.join(__dirname, '../assets');
+app.use('/assets/icons', express.static(path.join(iconsPath, 'icons')));
 app.use('/assets', express.static(path.join(__dirname, '../assets')));
 
 // Use API routes

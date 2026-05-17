@@ -160,7 +160,10 @@ async function downloadAndStoreIcon(iconUrl, projectNotionId) {
     // Hash only the stable path (not query params which contain rotating S3 tokens)
     const hash = crypto.createHash('md5').update(parsedUrl.pathname + projectNotionId).digest('hex');
     const filename = `${projectNotionId}_${hash}${extension}`;
-    const assetsDir = path.join(__dirname, '../../assets/icons');
+    const assetsDir = process.env.DATABASE_PATH
+      ? path.join(path.dirname(process.env.DATABASE_PATH), 'icons')
+      : path.join(__dirname, '../../assets/icons');
+    if (!fs.existsSync(assetsDir)) fs.mkdirSync(assetsDir, { recursive: true });
     const filePath = path.join(assetsDir, filename);
 
     // Skip download if icon already exists locally
