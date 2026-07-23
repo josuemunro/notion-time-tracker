@@ -1,23 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { getActiveClients } from '../services/api';
-import { ArrowPathIcon, UserGroupIcon } from '@heroicons/react/24/solid'; // Added UserGroupIcon
+import { ArrowPathIcon, UserGroupIcon } from '@heroicons/react/24/solid';
 import { formatHoursHuman } from '../utils/timeUtils';
+import EmptyState from '../components/common/EmptyState';
 
 function ClientCard({ client }) {
   return (
     <Link
       to={`/clients/${client.id}`} // Use local DB ID for routing
-      className="block p-6 bg-white rounded-lg shadow-lg hover:shadow-xl transition-shadow duration-200 ease-in-out"
+      className="block p-6 bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200"
     >
       <div className="flex items-center mb-3">
         <UserGroupIcon className="h-8 w-8 text-indigo-500 mr-3" />
-        <h3 className="text-xl font-semibold text-indigo-700">{client.name}</h3>
+        <h3 className="text-lg font-semibold text-gray-900">{client.name}</h3>
       </div>
-      <div className="text-sm text-gray-600">
+      <div className="text-sm text-gray-500">
         <p>
           Total Time Logged:
-          <span className="font-medium ml-1">
+          <span className="font-medium text-gray-700 ml-1">
             {formatHoursHuman(parseFloat(client.totalHoursSpent || 0))}
           </span>
         </p>
@@ -63,18 +64,25 @@ function ClientsPage() {
       <p className="ml-3 text-lg text-gray-700">Loading Clients...</p>
     </div>
   );
-  if (error) return <p className="text-center text-red-500 bg-red-100 p-4 rounded-md">{error}</p>;
+  if (error) return <p className="text-center text-red-600 bg-red-50 border border-red-200 p-4 rounded-lg">{error}</p>;
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">Active Clients</h1>
-        <button onClick={fetchClients} disabled={isLoading} className="p-2 rounded-full hover:bg-gray-200 transition-colors" title="Refresh clients">
-          <ArrowPathIcon className={`h-6 w-6 text-gray-600 ${isLoading ? 'animate-spin' : ''}`} />
+      <div className="flex items-start justify-between gap-4 mb-8">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900">Clients</h1>
+          <p className="mt-1 text-sm text-gray-500">Active clients synced from Notion</p>
+        </div>
+        <button onClick={fetchClients} disabled={isLoading} className="p-2 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors" title="Refresh clients">
+          <ArrowPathIcon className={`h-6 w-6 ${isLoading ? 'animate-spin' : ''}`} />
         </button>
       </div>
       {clients.length === 0 && !isLoading && (
-        <p className="text-center text-gray-500 py-8">No active clients found. Try syncing with Notion first.</p>
+        <EmptyState
+          icon={UserGroupIcon}
+          title="No active clients found"
+          hint="Try syncing with Notion first."
+        />
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {clients.map(client => (

@@ -46,15 +46,15 @@ function App() {
                   <Route path="/tasks" element={<TasksPage />} />
                   <Route path="/calendar" element={<CalendarPage />} />
                   <Route path="*" element={
-                    <div className="text-center py-10">
-                      <h1 className="text-3xl font-semibold text-gray-700">404 - Page Not Found</h1>
-                      <p className="text-gray-500 mt-2">The page you are looking for does not exist.</p>
-                      <Link to="/" className="mt-6 inline-block bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition">Go Home</Link>
+                    <div className="text-center py-16">
+                      <h1 className="text-2xl font-bold tracking-tight text-gray-900">404 - Page Not Found</h1>
+                      <p className="text-sm text-gray-500 mt-2">The page you are looking for does not exist.</p>
+                      <Link to="/" className="mt-6 inline-flex items-center justify-center rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors">Go Home</Link>
                     </div>
                   } />
                 </Routes>
               </main>
-              <footer className="bg-gray-800 text-white text-center p-4">
+              <footer className="bg-gray-900 text-gray-400 text-sm text-center p-4">
                 © {new Date().getFullYear()} Notion Time Tracker
               </footer>
             </div>

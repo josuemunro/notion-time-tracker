@@ -25,8 +25,8 @@ function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm p-8 bg-white rounded-xl shadow-md">
-        <h1 className="text-2xl font-bold text-gray-800 text-center mb-6">Time Tracker</h1>
+      <div className="w-full max-w-sm p-8 bg-white rounded-xl border border-gray-200 shadow-md">
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900 text-center mb-6">⏳ N-Tracker</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <input
@@ -42,7 +42,7 @@ function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition"
+            className="w-full py-3 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
           >
             {loading ? 'Signing in...' : 'Sign in'}
           </button>

@@ -1,4 +1,6 @@
 // TimelineView version log
+// v1.4 — Styling only: outer container aligned to the app card language
+//        (rounded-xl + border-gray-200 + shadow-sm); no behavior changes
 // v1.3 — Zoomable timeline: Ctrl/Cmd+scroll (cursor-anchored) or header buttons, 20–240px/hr;
 //        snap increments scale with zoom; sub-28px entries render as a bar with the icon above;
 //        loading screen only on first load (refetches no longer unmount the timeline)
@@ -1276,7 +1278,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border">
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
       <div className="p-4 border-b">
         <div className="flex justify-between items-center">
           <div>

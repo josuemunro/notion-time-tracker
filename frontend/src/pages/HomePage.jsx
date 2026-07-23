@@ -8,6 +8,7 @@ import TimelineView from '../components/TimelineView';
 import MoneyTimer from '../components/MoneyTimer';
 import ProjectIcon from '../components/ProjectIcon';
 import AddTaskModal from '../components/AddTaskModal';
+import EmptyState from '../components/common/EmptyState';
 import { PlayIcon, StopIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, ListBulletIcon, PlusIcon } from '@heroicons/react/24/solid';
 import { getNZDateString, formatNZTime, formatDurationHuman } from '../utils/timeUtils';
 
@@ -159,7 +160,7 @@ function HomePage() {
   }
 
   return (
-    <div className="space-y-12">
+    <div className="space-y-10">
       {/* Money-first shader timer */}
       <MoneyTimer />
 
@@ -168,26 +169,26 @@ function HomePage() {
         <div className="max-w-lg mx-auto">
           <button
             onClick={handleStop}
-            className="w-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-6 rounded-lg text-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:scale-105"
+            className="w-full flex items-center justify-center bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-xl transition-colors shadow-sm hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2"
           >
-            <StopIcon className="h-6 w-6 mr-2" /> Stop Timer
+            <StopIcon className="h-5 w-5 mr-2" /> Stop Timer
           </button>
         </div>
       )}
 
       {/* Timeline View with Date Navigation */}
       <div className="space-y-4">
-        <div className="flex items-center justify-between bg-white rounded-lg shadow-sm border p-4">
+        <div className="flex items-center justify-between bg-white rounded-xl border border-gray-200 shadow-sm p-4">
           <button
             onClick={() => navigateToDate('prev')}
-            className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <ChevronLeftIcon className="h-5 w-5" />
             <span>Previous Day</span>
           </button>
 
           <div className="flex items-center space-x-4">
-            <h2 className="text-lg font-semibold text-gray-800">
+            <h2 className="text-lg font-semibold text-gray-900">
               {new Date(selectedDate).toLocaleDateString('en-NZ', {
                 weekday: 'long',
                 year: 'numeric',
@@ -196,13 +197,13 @@ function HomePage() {
               })}
             </h2>
             {selectedDate === todayDate ? (
-              <span className="px-3 py-1 text-sm bg-green-100 text-green-700 rounded-lg font-medium">
+              <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-700">
                 Today
               </span>
             ) : (
               <button
                 onClick={goToToday}
-                className="px-3 py-1 text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg transition-colors"
+                className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-200 transition-colors"
               >
                 Go to Today
               </button>
@@ -211,7 +212,7 @@ function HomePage() {
 
           <button
             onClick={() => navigateToDate('next')}
-            className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
           >
             <span>Next Day</span>
             <ChevronRightIcon className="h-5 w-5" />
@@ -221,15 +222,15 @@ function HomePage() {
         <TimelineView selectedDate={selectedDate} />
       </div>
 
-      {/* Tabs */}
-      <div>
-        <div className="flex items-center border-b mb-6">
+      {/* Tabbed section: one card, the tab bar is its header (single structural line) */}
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+        <div className="flex items-center gap-1 px-3 border-b border-gray-200">
           <button
             onClick={() => setActiveTab('tasks')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold border-b-2 transition-colors ${
+            className={`-mb-px flex items-center gap-2 px-4 py-3.5 text-sm font-semibold border-b-2 transition-colors ${
               activeTab === 'tasks'
                 ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
             <ListBulletIcon className="h-5 w-5" />
@@ -237,23 +238,23 @@ function HomePage() {
           </button>
           <button
             onClick={() => setActiveTab('entries')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold border-b-2 transition-colors ${
+            className={`-mb-px flex items-center gap-2 px-4 py-3.5 text-sm font-semibold border-b-2 transition-colors ${
               activeTab === 'entries'
                 ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
             <ClockIcon className="h-5 w-5" />
             Today's Entries
             {dayEntries.length > 0 && (
-              <span className="ml-1 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{dayEntries.length}</span>
+              <span className="ml-1 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{dayEntries.length}</span>
             )}
           </button>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 py-2 pr-1">
             {activeTab === 'tasks' && (
               <button
                 onClick={() => setShowAddTaskModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-100 transition-colors"
               >
                 <PlusIcon className="h-4 w-4" />
                 Add Task
@@ -262,12 +263,14 @@ function HomePage() {
             <button
               onClick={() => activeTab === 'tasks' ? fetchInProgress() : fetchDayEntries()}
               disabled={isLoadingTasks || isLoadingEntries}
-              className="p-2 rounded-full hover:bg-gray-200 transition-colors"
+              className="p-2 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
             >
-              <ArrowPathIcon className={`h-5 w-5 text-gray-600 ${(isLoadingTasks || isLoadingEntries) ? 'animate-spin' : ''}`} />
+              <ArrowPathIcon className={`h-5 w-5 ${(isLoadingTasks || isLoadingEntries) ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </div>
+
+        <div className="p-5">
 
         {/* Quick Start Tasks Tab */}
         {activeTab === 'tasks' && (
@@ -278,39 +281,62 @@ function HomePage() {
                 <p className="ml-3 text-gray-600">Loading tasks...</p>
               </div>
             )}
-            {errorTasks && <p className="text-center text-red-500 bg-red-100 p-3 rounded-md">{errorTasks}</p>}
+            {errorTasks && <p className="text-center text-red-600 bg-red-50 border border-red-200 p-3 rounded-lg">{errorTasks}</p>}
             {!isLoadingTasks && !errorTasks && inProgressTasksByProject.length === 0 && (
-              <p className="text-center text-gray-500 py-8">No tasks currently marked as 'in-progress' or active.</p>
+              <EmptyState
+                icon={ListBulletIcon}
+                title="No tasks in progress"
+                hint="Tasks marked 'To Do' or 'Doing' in Notion will appear here after a sync."
+              />
             )}
-            {!isLoadingTasks && !errorTasks && inProgressTasksByProject.map((projectGroup) => (
-              <div key={projectGroup.projectId || projectGroup.projectName} className="mb-8 p-4 bg-gray-50/50 rounded-lg shadow">
-                <h4 className="text-xl font-semibold text-gray-700 mb-3 border-b pb-2">
-                  {projectGroup.projectName || 'Unnamed Project'}
-                </h4>
-                {projectGroup.tasks && projectGroup.tasks.length > 0 ? (
-                  projectGroup.tasks.map((task) => (
-                    <TaskItem
-                      key={task.id || task.taskId}
-                      task={{
-                        id: task.id || task.taskId,
-                        name: task.name || task.taskName,
-                        projectName: projectGroup.projectName,
-                        projectIconType: projectGroup.projectIconType,
-                        projectIconValue: projectGroup.projectIconValue,
-                        projectColor: projectGroup.projectColor,
-                        status: task.status || task.taskStatus,
-                        totalHoursSpent: task.totalHoursSpent,
-                        isManual: task.isManual,
-                      }}
-                      onStartOverride={handleQuickStart}
-                      onMarkDone={handleMarkDone}
-                    />
-                  ))
-                ) : (
-                  <p className="text-sm text-gray-500">No tasks listed for this project group.</p>
-                )}
+            {!isLoadingTasks && !errorTasks && inProgressTasksByProject.length > 0 && (
+              <div className="space-y-7">
+                {inProgressTasksByProject.map((projectGroup) => (
+                  <div key={projectGroup.projectId || projectGroup.projectName}>
+                    {/* No underline — icon + name + count chip, whitespace separates groups */}
+                    <div className="flex items-center gap-2.5 mb-3">
+                      <ProjectIcon
+                        iconType={projectGroup.projectIconType}
+                        iconValue={projectGroup.projectIconValue}
+                        projectName={projectGroup.projectName}
+                        projectColor={projectGroup.projectColor}
+                        className="w-6 h-6"
+                      />
+                      <h4 className="text-base font-semibold text-gray-900">
+                        {projectGroup.projectName || 'Unnamed Project'}
+                      </h4>
+                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                        {projectGroup.tasks?.length || 0}
+                      </span>
+                    </div>
+                    {projectGroup.tasks && projectGroup.tasks.length > 0 ? (
+                      <div className="space-y-3">
+                        {projectGroup.tasks.map((task) => (
+                          <TaskItem
+                            key={task.id || task.taskId}
+                            task={{
+                              id: task.id || task.taskId,
+                              name: task.name || task.taskName,
+                              projectName: projectGroup.projectName,
+                              projectIconType: projectGroup.projectIconType,
+                              projectIconValue: projectGroup.projectIconValue,
+                              projectColor: projectGroup.projectColor,
+                              status: task.status || task.taskStatus,
+                              totalHoursSpent: task.totalHoursSpent,
+                              isManual: task.isManual,
+                            }}
+                            onStartOverride={handleQuickStart}
+                            onMarkDone={handleMarkDone}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400">No tasks listed for this project group.</p>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </>
         )}
 
@@ -324,47 +350,59 @@ function HomePage() {
               </div>
             )}
             {!isLoadingEntries && dayEntries.length === 0 && (
-              <p className="text-center text-gray-500 py-8">No time entries for this day.</p>
+              <EmptyState
+                icon={ClockIcon}
+                title="No time entries for this day"
+                hint="Start a timer or drag on the timeline to log time."
+              />
             )}
             {!isLoadingEntries && dayEntries.length > 0 && (
-              <div className="space-y-3">
-                {dayEntries.map((entry) => (
-                  <div
-                    key={entry.timeEntryId}
-                    className="flex items-center gap-4 p-4 bg-white rounded-lg shadow-sm border hover:shadow-md transition-shadow"
-                  >
-                    <ProjectIcon
-                      iconType={entry.projectIconType}
-                      iconValue={entry.projectIconValue}
-                      projectName={entry.projectName}
-                      projectColor={entry.projectColor}
-                      className="w-8 h-8"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-gray-800 truncate">{entry.taskName}</div>
-                      <div className="text-sm text-gray-500 truncate">{entry.projectName}</div>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-sm font-medium text-gray-700">
-                        {formatNZTime(entry.startTime)} – {entry.endTime ? formatNZTime(entry.endTime) : 'Running'}
-                      </div>
-                      <div className="text-sm text-gray-500">
-                        {entry.duration ? formatDurationHuman(entry.duration) : 'In progress'}
-                      </div>
-                    </div>
+              <>
+                {/* Flat divided list — the card provides the frame, rows don't need their own */}
+                <div className="divide-y divide-gray-100">
+                  {dayEntries.map((entry) => (
                     <div
-                      className="w-1.5 h-12 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: entry.projectColor || '#6366f1' }}
-                    />
-                  </div>
-                ))}
-                <div className="text-right text-sm font-semibold text-gray-600 pt-2 border-t">
-                  Total: {formatDurationHuman(dayEntries.reduce((sum, e) => sum + (e.duration || 0), 0))}
+                      key={entry.timeEntryId}
+                      className="flex items-center gap-3 py-3 first:pt-0"
+                    >
+                      <div
+                        className="w-1 h-10 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: entry.projectColor || '#6366f1' }}
+                      />
+                      <ProjectIcon
+                        iconType={entry.projectIconType}
+                        iconValue={entry.projectIconValue}
+                        projectName={entry.projectName}
+                        projectColor={entry.projectColor}
+                        className="w-7 h-7"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-gray-800 truncate">{entry.taskName}</div>
+                        <div className="text-sm text-gray-500 truncate">{entry.projectName}</div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-sm font-medium text-gray-700 tabular-nums">
+                          {formatNZTime(entry.startTime)} – {entry.endTime ? formatNZTime(entry.endTime) : 'Running'}
+                        </div>
+                        <div className="text-sm text-gray-500">
+                          {entry.duration ? formatDurationHuman(entry.duration) : 'In progress'}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
+                {/* Footer strip bleeds to the card edges for a clean total row */}
+                <div className="mt-4 -mx-5 -mb-5 px-5 py-3 bg-gray-50 border-t border-gray-200 flex justify-end items-baseline gap-2 text-sm">
+                  <span className="text-gray-500">Total</span>
+                  <span className="font-semibold text-gray-900">
+                    {formatDurationHuman(dayEntries.reduce((sum, e) => sum + (e.duration || 0), 0))}
+                  </span>
+                </div>
+              </>
             )}
           </>
         )}
+        </div>
       </div>
 
       {/* Add Task Modal */}

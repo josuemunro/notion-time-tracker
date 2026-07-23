@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { CheckIcon } from '@heroicons/react/24/solid';
 import BillingModal from './BillingModal';
+import ProjectIcon from './ProjectIcon';
+import EmptyState from './common/EmptyState';
 import { computeBillTotals, taskBillAmount, formatNZD } from '../utils/billingUtils';
 
 function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
@@ -14,9 +16,9 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
 
   if (unbilledTasks.length === 0) {
     return (
-      <div className="bg-white p-6 rounded-lg shadow-xl">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-4">Unbilled Tasks</h2>
-        <p className="text-gray-500">No unbilled tasks found for this project.</p>
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-900 mb-2">Unbilled Tasks</h2>
+        <EmptyState title="No unbilled tasks for this project" hint="Billable tasks that haven't been billed yet will appear here." />
       </div>
     );
   }
@@ -51,8 +53,17 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
 
   return (
     <>
-      <div className="bg-white p-6 rounded-lg shadow-xl">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-6">Unbilled Tasks</h2>
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+        <div className="flex items-center gap-2.5 mb-5">
+          <ProjectIcon
+            iconType={project.iconType}
+            iconValue={project.iconValue}
+            projectName={project.name}
+            projectColor={project.color}
+            className="w-6 h-6"
+          />
+          <h2 className="text-lg font-semibold text-gray-900">Unbilled Tasks</h2>
+        </div>
 
         <div className="flex flex-col lg:flex-row gap-6">
           {/* Task List - 70% width on desktop */}
@@ -81,12 +92,12 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
                         <div className="flex items-center gap-2 flex-wrap">
                           <h3 className="font-medium text-gray-800">{task.name}</h3>
                           {task.fixedPrice != null && (
-                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                            <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700">
                               Fixed {formatNZD(task.fixedPrice)}
                             </span>
                           )}
                           {task.fixedPrice == null && task.hourlyRateOverride != null && (
-                            <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-medium">
+                            <span className="inline-flex items-center rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-700">
                               @{formatNZD(task.hourlyRateOverride)}/hr
                             </span>
                           )}
@@ -111,7 +122,7 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
           {/* Bill Preview - 30% width on desktop */}
           <div className="lg:w-[30%]">
             <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 sticky top-4">
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Bill Preview</h3>
+              <h3 className="text-base font-semibold text-gray-900 mb-4">Bill Preview</h3>
 
               {selectedTasksArray.length === 0 ? (
                 <p className="text-gray-500 text-sm">Select tasks to preview bill</p>
@@ -168,7 +179,7 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
                   <button
                     onClick={handleCreateBill}
                     disabled={selectedTasksArray.length === 0}
-                    className="w-full mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                    className="w-full mt-4 inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                   >
                     Create Bill
                   </button>

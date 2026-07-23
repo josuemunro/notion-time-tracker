@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getProjectBills } from '../services/api';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { ChevronDownIcon, ChevronRightIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
+import EmptyState from './common/EmptyState';
 
 // Bill timestamps follow the app convention: NZ wall-clock time stored as a UTC ISO
 // string, so format in UTC to display the original NZ time unshifted
@@ -50,8 +51,8 @@ function PreviousBillsSection({ project, refreshToken = 0 }) {
   if (!project) return null;
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl">
-      <h2 className="text-2xl font-semibold text-gray-800 mb-4">Previous Bills</h2>
+    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+      <h2 className="text-lg font-semibold text-gray-900 mb-4">Previous Bills</h2>
 
       {isLoading && (
         <div className="flex items-center text-gray-500 py-4">
@@ -61,7 +62,7 @@ function PreviousBillsSection({ project, refreshToken = 0 }) {
       )}
 
       {!isLoading && bills.length === 0 && (
-        <p className="text-gray-500">No bills created yet. Completed bills will appear here with their task breakdowns.</p>
+        <EmptyState title="No bills created yet" hint="Completed bills will appear here with their task breakdowns." />
       )}
 
       {!isLoading && bills.length > 0 && (
@@ -104,7 +105,7 @@ function PreviousBillsSection({ project, refreshToken = 0 }) {
                           <span className="text-gray-700 truncate pr-4">
                             {task.taskName}
                             {task.fixedPrice != null && (
-                              <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                              <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700">
                                 Fixed {formatCurrency(task.fixedPrice)}
                               </span>
                             )}

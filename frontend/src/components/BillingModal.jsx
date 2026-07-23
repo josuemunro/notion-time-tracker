@@ -57,41 +57,29 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
 
   return (
     <div
-      className="fixed z-50"
-      style={{
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.3)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '1rem',
-        marginBottom: '0'
-      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+        className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          <h2 className="text-2xl font-semibold text-gray-800">Final Bill</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Final Bill</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-full hover:bg-gray-100 transition-colors"
+            className="p-2 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
           >
-            <XMarkIcon className="w-6 h-6 text-gray-500" />
+            <XMarkIcon className="w-5 h-5" />
           </button>
         </div>
 
         {/* Bill Content */}
         <div className="p-6 space-y-6">
           {/* Project Info */}
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h3 className="font-semibold text-gray-800 mb-2">Project: {project.name}</h3>
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+            <h3 className="font-semibold text-gray-900 mb-2">Project: {project.name}</h3>
             <p className="text-sm text-gray-600">Client: {project.clientName || 'N/A'}</p>
             <p className="text-sm text-gray-600">Rate: {formatCurrency(project.hourlyRate || 0)}/hour</p>
           </div>
@@ -210,17 +198,17 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end space-x-3 p-6 border-t border-gray-200">
+        <div className="flex justify-end gap-3 p-6 border-t border-gray-200">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+            className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleCompleteBill}
             disabled={isUpdating}
-            className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center justify-center rounded-lg bg-green-600 px-6 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2"
           >
             {isUpdating ? 'Processing...' : 'Complete Bill'}
           </button>

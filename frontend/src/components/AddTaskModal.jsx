@@ -103,15 +103,15 @@ const AddTaskModal = ({ isOpen, onClose, onTaskCreated }) => {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
 
-      <div className="relative bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 flex flex-col">
+      <div className="relative bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-xl font-semibold text-gray-800">Add New Task</h2>
+        <div className="flex items-center justify-between p-6 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">Add New Task</h2>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            className="p-2 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors"
           >
-            <XMarkIcon className="h-5 w-5 text-gray-500" />
+            <XMarkIcon className="h-5 w-5" />
           </button>
         </div>
 
@@ -140,21 +140,37 @@ const AddTaskModal = ({ isOpen, onClose, onTaskCreated }) => {
 
             {!showNewProject ? (
               <div className="space-y-2">
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                  disabled={isLoading}
-                >
-                  <option value="">
-                    {isLoading ? 'Loading projects...' : 'Select a project'}
-                  </option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    // Native <select> can't render components — show the chosen
+                    // project's icon beside it instead
+                    const selectedProject = projects.find((p) => String(p.id) === String(selectedProjectId));
+                    return selectedProject ? (
+                      <ProjectIcon
+                        iconType={selectedProject.iconType}
+                        iconValue={selectedProject.iconValue}
+                        projectName={selectedProject.name}
+                        projectColor={selectedProject.color}
+                        className="w-8 h-8 flex-shrink-0"
+                      />
+                    ) : null;
+                  })()}
+                  <select
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    className="flex-1 min-w-0 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                    disabled={isLoading}
+                  >
+                    <option value="">
+                      {isLoading ? 'Loading projects...' : 'Select a project'}
                     </option>
-                  ))}
-                </select>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -253,14 +269,14 @@ const AddTaskModal = ({ isOpen, onClose, onTaskCreated }) => {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
             >
               {isSubmitting ? 'Creating...' : 'Add Task'}
             </button>

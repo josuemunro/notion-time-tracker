@@ -1,10 +1,11 @@
 import React from 'react';
 import { formatHoursHuman } from '../utils/timeUtils';
+import { taskBillAmount, formatNZD } from '../utils/billingUtils';
 
 function BillingOverview({ project, tasks }) {
   if (!project || !tasks) return null;
 
-  // Calculate billing totals
+  // Calculate billing totals (taskBillAmount respects fixed prices + rate overrides)
   const billedTasks = tasks.filter(task => task.isBillable && task.beenBilled);
   const unbilledTasks = tasks.filter(task => task.isBillable && !task.beenBilled);
   const unbillableTasks = tasks.filter(task => !task.isBillable);
@@ -13,19 +14,14 @@ function BillingOverview({ project, tasks }) {
   const totalUnbilledTime = unbilledTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
   const totalUnbillableTime = unbillableTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
 
-  const totalBilledAmount = totalBilledTime * (project.hourlyRate || 0);
-  const totalUnbilledAmount = totalUnbilledTime * (project.hourlyRate || 0);
+  const totalBilledAmount = billedTasks.reduce((sum, task) => sum + taskBillAmount(task, project.hourlyRate), 0);
+  const totalUnbilledAmount = unbilledTasks.reduce((sum, task) => sum + taskBillAmount(task, project.hourlyRate), 0);
 
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-NZ', {
-      style: 'currency',
-      currency: 'NZD'
-    }).format(amount);
-  };
+  const formatCurrency = formatNZD;
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-xl">
-      <h2 className="text-2xl font-semibold text-gray-800 mb-6">Billing Overview</h2>
+    <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+      <h2 className="text-lg font-semibold text-gray-900 mb-5">Billing Overview</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Total Billed */}

@@ -212,10 +212,10 @@ function MoneyTimer() {
 
   if (!isRunning) {
     return (
-      <div className="relative max-w-lg mx-auto rounded-2xl overflow-hidden shadow-xl bg-gradient-to-br from-gray-900 via-slate-800 to-gray-900">
+      <div className="relative max-w-lg mx-auto rounded-xl overflow-hidden border border-gray-800 shadow-lg bg-gradient-to-br from-gray-900 to-gray-800">
         <div className="relative z-10 p-8 flex flex-col items-center text-center">
-          <p className="text-gray-400 text-sm uppercase tracking-widest mb-2">Ready to work</p>
-          <p className="text-gray-500 text-sm mb-6">Start a task — watch the money come in.</p>
+          <p className="text-yellow-400/90 text-xs font-semibold uppercase tracking-[0.2em] mb-2">Ready to work</p>
+          <p className="text-gray-400 text-sm mb-6">Start a task — watch the money come in.</p>
           <div className="flex items-baseline space-x-2">
             <span className="text-4xl font-bold text-emerald-400 tabular-nums">{formatNZD(todayEarnings)}</span>
           </div>
@@ -228,7 +228,7 @@ function MoneyTimer() {
   }
 
   return (
-    <div className="relative max-w-lg mx-auto rounded-2xl overflow-hidden shadow-2xl bg-gray-900" style={{ minHeight: '300px' }}>
+    <div className="relative max-w-lg mx-auto rounded-xl overflow-hidden border border-gray-800 shadow-lg bg-gray-900" style={{ minHeight: '300px' }}>
       <ShaderCanvas color={color} intensity={intensity} />
       <div className="relative z-10 p-8 flex flex-col items-center text-center text-white">
         <div className="flex items-center space-x-2 mb-1">

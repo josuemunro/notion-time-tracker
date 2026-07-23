@@ -1,7 +1,8 @@
-import React, {useEffect, useState} from 'react';
+import React, { useEffect, useState } from 'react';
 import { getTasks } from '../services/api';
 import TaskItem from '../components/common/TaskItem';
-import { ArrowPathIcon } from '@heroicons/react/24/solid';
+import { ArrowPathIcon, ListBulletIcon } from '@heroicons/react/24/solid';
+import EmptyState from '../components/common/EmptyState';
 
 
 function TasksPage() {
@@ -36,17 +37,26 @@ function TasksPage() {
             <p className="ml-3 text-lg text-gray-700">Loading Tasks...</p>
         </div>
     );
-    if (error) return <p className="text-center text-red-500 bg-red-100 p-4 rounded-md">{error}</p>;
+    if (error) return <p className="text-center text-red-600 bg-red-50 border border-red-200 p-4 rounded-lg">{error}</p>;
 
 
     return (
         <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-6">All Tasks</h1>
+            <div className="flex items-start justify-between gap-4 mb-8">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-gray-900">All Tasks</h1>
+                    <p className="mt-1 text-sm text-gray-500">Every task cached locally from Notion</p>
+                </div>
+            </div>
              {/* Add filter controls here if needed */}
             {tasks.length === 0 && (
-                <p className="text-center text-gray-500">No tasks found.</p>
+                <EmptyState
+                    icon={ListBulletIcon}
+                    title="No tasks found"
+                    hint="Try syncing with Notion first."
+                />
             )}
-            <div className="space-y-4">
+            <div className="space-y-3">
                 {tasks.map(task => (
                     <TaskItem key={task.id} task={task} />
                 ))}

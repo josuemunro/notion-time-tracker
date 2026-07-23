@@ -59,22 +59,17 @@ function TaskPricingModal({ task, project, onClose, onSaved }) {
 
   return (
     <div
-      className="fixed z-50"
-      style={{
-        top: 0, left: 0, right: 0, bottom: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.3)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem',
-      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
       onClick={onClose}
     >
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-gray-200">
           <div>
-            <h2 className="text-lg font-semibold text-gray-800">Task Pricing</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Task Pricing</h2>
             <p className="text-sm text-gray-500 truncate">{task.name}</p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 transition-colors">
-            <XMarkIcon className="w-5 h-5 text-gray-500" />
+          <button onClick={onClose} className="p-2 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors">
+            <XMarkIcon className="w-5 h-5" />
           </button>
         </div>
 
@@ -93,7 +88,7 @@ function TaskPricingModal({ task, project, onClose, onSaved }) {
                 className="mt-1"
               />
               <div>
-                <p className="font-medium text-gray-800">{opt.label}</p>
+                <p className="font-medium text-gray-900">{opt.label}</p>
                 <p className="text-sm text-gray-500">{opt.description}</p>
               </div>
             </label>
@@ -119,17 +114,17 @@ function TaskPricingModal({ task, project, onClose, onSaved }) {
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
 
-        <div className="flex justify-end space-x-3 p-5 border-t border-gray-200">
+        <div className="flex justify-end gap-3 p-5 border-t border-gray-200">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+            className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={isSaving || !amountValid || (needsAmount && amount === '')}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
           >
             {isSaving ? 'Saving...' : 'Save'}
           </button>

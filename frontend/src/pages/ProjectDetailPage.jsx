@@ -8,6 +8,7 @@ import UnbilledTasksSection from '../components/UnbilledTasksSection';
 import PreviousBillsSection from '../components/PreviousBillsSection';
 import TaskPricingModal from '../components/TaskPricingModal';
 import { ArrowPathIcon, ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/solid';
+import EmptyState from '../components/common/EmptyState';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { useTimer } from '../contexts/TimerContext'; // Import useTimer
 
@@ -132,7 +133,7 @@ function ProjectDetailPage() {
       </div>
     );
   }
-  if (error) return <p className="text-center text-red-500 bg-red-100 p-4 rounded-md">{error}</p>;
+  if (error) return <p className="text-center text-red-600 bg-red-50 border border-red-200 p-4 rounded-lg">{error}</p>;
   if (!project) return <p className="text-center text-gray-500">Project not found.</p>;
 
   const budgetUsedPercent = project.budgetedTime > 0
@@ -141,12 +142,12 @@ function ProjectDetailPage() {
 
   return (
     <div className="space-y-8">
-      <Link to="/projects" className="inline-flex items-center text-blue-600 hover:text-blue-800 transition-colors mb-6">
-        <ArrowLeftIcon className="h-5 w-5 mr-2" />
+      <Link to="/projects" className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors group">
+        <ArrowLeftIcon className="h-4 w-4 mr-2 group-hover:-translate-x-1 transition-transform" />
         Back to Projects
       </Link>
 
-      <div className="bg-white p-6 rounded-lg shadow-xl">
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
           <div className="flex items-start space-x-4">
             <ProjectIcon
@@ -157,27 +158,27 @@ function ProjectDetailPage() {
               className="w-12 h-12 mt-1"
             />
             <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-1">{project.name}</h1>
-              <p className="text-md text-gray-600">Client: {project.clientName || 'N/A'}</p>
-              <p className="text-md text-gray-600">Status: <span className="font-medium">{project.status || 'N/A'}</span></p>
+              <h1 className="text-2xl font-bold tracking-tight text-gray-900 mb-1">{project.name}</h1>
+              <p className="text-sm text-gray-500 mb-1.5">Client: {project.clientName || 'N/A'}</p>
+              <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">{project.status || 'N/A'}</span>
             </div>
           </div>
           <div className="flex items-center space-x-2 mt-4 md:mt-0">
-            <button onClick={() => fetchProject()} disabled={isLoading} className="p-2 rounded-full hover:bg-gray-200 transition-colors">
-              <ArrowPathIcon className={`h-6 w-6 text-gray-600 ${isLoading ? 'animate-spin' : ''}`} />
+            <button onClick={() => fetchProject()} disabled={isLoading} className="p-2 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors" title="Refresh project">
+              <ArrowPathIcon className={`h-6 w-6 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
             <button
               onClick={() => setShowDeleteModal(true)}
-              className="p-2 rounded-full hover:bg-red-100 transition-colors"
+              className="p-2 rounded-full text-red-600 hover:bg-red-50 transition-colors"
               title="Delete Project"
             >
-              <TrashIcon className="h-6 w-6 text-red-600" />
+              <TrashIcon className="h-6 w-6" />
             </button>
           </div>
         </div>
 
         {/* Project Settings Section */}
-        <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+        <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
           <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Project Settings</h4>
 
           {/* Color Picker Row */}
@@ -221,7 +222,7 @@ function ProjectDetailPage() {
                   }}
                   disabled={isUpdatingColor}
                   placeholder="#6366f1"
-                  className="w-24 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  className="w-24 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 />
               </div>
               {isUpdatingColor && (
@@ -266,7 +267,7 @@ function ProjectDetailPage() {
                   }}
                   disabled={isUpdatingRate}
                   placeholder="0.00"
-                  className="w-24 px-2 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  className="w-24 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
                 />
                 <span className="text-sm text-gray-500 ml-1">/hour</span>
               </div>
@@ -323,7 +324,7 @@ function ProjectDetailPage() {
       <PreviousBillsSection project={project} refreshToken={billsRefreshToken} />
 
       <div>
-        <h2 className="text-2xl font-semibold text-gray-800 mb-4">Tasks</h2>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Tasks</h2>
         {project.tasks && project.tasks.length > 0 ? (
           <div className="space-y-3">
             {project.tasks.map(task => (
@@ -339,7 +340,7 @@ function ProjectDetailPage() {
             ))}
           </div>
         ) : (
-          <p className="text-gray-500">No tasks found for this project.</p>
+          <EmptyState title="No tasks found for this project" hint="Tasks will appear here after a Notion sync." />
         )}
       </div>
 
@@ -359,44 +360,33 @@ function ProjectDetailPage() {
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
         <div
-          className="fixed z-50"
-          style={{
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0, 0, 0, 0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1rem'
-          }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40"
           onClick={() => setShowDeleteModal(false)}
         >
           <div
-            className="bg-white rounded-lg shadow-xl max-w-md w-full"
+            className="bg-white rounded-xl shadow-xl max-w-md w-full"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-6">
               <div className="flex items-center mb-4">
                 <TrashIcon className="h-8 w-8 text-red-600 mr-3" />
-                <h2 className="text-xl font-semibold text-gray-800">Delete Project</h2>
+                <h2 className="text-lg font-semibold text-gray-900">Delete Project</h2>
               </div>
               <p className="text-gray-600 mb-6">
                 Are you sure you want to delete "{project.name}"? This will permanently delete the project and all its tasks and time entries. This action cannot be undone.
               </p>
-              <div className="flex justify-end space-x-3">
+              <div className="flex justify-end gap-3">
                 <button
                   onClick={() => setShowDeleteModal(false)}
                   disabled={isDeleting}
-                  className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:bg-gray-100 transition-colors"
+                  className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleDeleteProject}
                   disabled={isDeleting}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed transition-colors"
+                  className="inline-flex items-center justify-center rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:bg-red-400 disabled:cursor-not-allowed transition-colors"
                 >
                   {isDeleting ? 'Deleting...' : 'Delete Project'}
                 </button>

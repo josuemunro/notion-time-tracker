@@ -77,7 +77,7 @@ function Navbar() {
             <button
               onClick={handleSync}
               disabled={isSyncing}
-              className="bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-semibold py-2 px-3 sm:px-4 rounded transition-colors flex items-center disabled:opacity-70"
+              className="bg-yellow-500 hover:bg-yellow-600 text-gray-900 text-sm font-semibold py-2 px-3 sm:px-4 rounded-lg transition-colors inline-flex items-center disabled:opacity-70 focus:outline-none focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
             >
               <ArrowPathIcon className={`h-5 w-5 mr-1 sm:mr-2 ${isSyncing ? 'animate-spin' : ''}`} />
               {isSyncing ? 'Syncing...' : 'Sync Notion'}

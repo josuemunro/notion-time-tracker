@@ -95,11 +95,11 @@ function CalendarPage() {
   return (
     <div className="space-y-4">
       {/* Header: navigation + totals */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white rounded-lg shadow-sm border p-4">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <div className="flex items-center space-x-2">
           <button
             onClick={() => setWeekOffset(w => w - 1)}
-            className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
             title="Previous week"
           >
             <ChevronLeftIcon className="h-5 w-5" />
@@ -107,18 +107,18 @@ function CalendarPage() {
           <button
             onClick={() => setWeekOffset(0)}
             disabled={weekOffset === 0}
-            className="px-3 py-1.5 text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             This Week
           </button>
           <button
             onClick={() => setWeekOffset(w => w + 1)}
-            className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+            className="p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
             title="Next week"
           >
             <ChevronRightIcon className="h-5 w-5" />
           </button>
-          <h1 className="text-lg font-semibold text-gray-800 ml-2">{rangeLabel}</h1>
+          <h1 className="text-lg font-semibold text-gray-900 ml-2">{rangeLabel}</h1>
         </div>
         <div className="flex items-center space-x-6">
           <div className="text-right">
@@ -133,7 +133,7 @@ function CalendarPage() {
       </div>
 
       {/* Week grid */}
-      <div className="bg-white rounded-lg shadow-sm border overflow-x-auto">
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
         {isLoading ? (
           <div className="flex justify-center items-center py-20">
             <ArrowPathIcon className="h-8 w-8 text-gray-400 animate-spin" />
