@@ -369,13 +369,6 @@ function HomePage() {
                         className="w-1 h-10 rounded-full flex-shrink-0"
                         style={{ backgroundColor: entry.projectColor || '#6366f1' }}
                       />
-                      <ProjectIcon
-                        iconType={entry.projectIconType}
-                        iconValue={entry.projectIconValue}
-                        projectName={entry.projectName}
-                        projectColor={entry.projectColor}
-                        className="w-7 h-7"
-                      />
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-gray-800 truncate">{entry.taskName}</div>
                         <div className="text-sm text-gray-500 truncate">{entry.projectName}</div>

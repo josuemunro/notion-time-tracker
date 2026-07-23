@@ -3,7 +3,6 @@ import { PlayIcon, StopIcon, ClockIcon, CheckIcon, CurrencyDollarIcon } from '@h
 import { useTimer } from '../../contexts/TimerContext';
 import { formatHoursHuman } from '../../utils/timeUtils';
 import { formatNZD } from '../../utils/billingUtils';
-import ProjectIcon from '../ProjectIcon';
 
 function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPricing }) {
   const { startTimer, stopTimer, activeTimerDetails, isRunning } = useTimer();
@@ -31,14 +30,7 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPri
                        ? 'border-blue-300 bg-gradient-to-r from-blue-50 to-indigo-50 ring-2 ring-blue-500 ring-offset-1'
                        : 'border-gray-200 bg-white shadow-sm hover:shadow-md'}`}>
       <div className="flex justify-between items-center">
-        <div className="flex items-start space-x-3 flex-1 min-w-0">
-          <ProjectIcon
-            iconType={task.projectIconType || task.project?.iconType}
-            iconValue={task.projectIconValue || task.project?.iconValue}
-            projectName={task.projectName || task.project?.name}
-            projectColor={task.projectColor || task.project?.color}
-            className="w-6 h-6 mt-1 flex-shrink-0"
-          />
+        <div className="flex items-start flex-1 min-w-0">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h4 className={`font-semibold text-base ${isThisTaskActive ? 'text-blue-700' : 'text-gray-900'}`}>{task.name || task.taskName}</h4>

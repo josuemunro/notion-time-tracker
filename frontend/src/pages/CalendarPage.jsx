@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { getTimeEntries } from '../services/api';
 import { formatDurationCompact, formatNZTimeRange, getNZDateString, getNZHoursDecimal } from '../utils/timeUtils';
 import { entryEarnings, formatNZD } from '../utils/billingUtils';
+import ProjectIcon from '../components/ProjectIcon';
 import { ChevronLeftIcon, ChevronRightIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
 
 // Read-only week calendar: seven day columns, entries as project-colored blocks.
@@ -218,8 +219,17 @@ function CalendarPage() {
                           title={`${entry.taskName} — ${entry.projectName}\n${formatNZTimeRange(entry.startTime, entry.endTime)} · ${formatDurationCompact(entry.duration || 0)} · ${formatNZD(entryEarnings(entry))}`}
                         >
                           {height >= 18 && (
-                            <div className="px-1.5 py-0.5 text-[11px] leading-tight text-white/95 font-medium truncate" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>
-                              {entry.taskName}
+                            <div className="px-1.5 py-0.5 flex items-center gap-1 text-[11px] leading-tight text-white/95 font-medium" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>
+                              {height >= 30 && (
+                                <ProjectIcon
+                                  iconType={entry.projectIconType}
+                                  iconValue={entry.projectIconValue}
+                                  projectName={entry.projectName}
+                                  projectColor={entry.projectColor}
+                                  className="w-3.5 h-3.5 flex-shrink-0"
+                                />
+                              )}
+                              <span className="truncate">{entry.taskName}</span>
                             </div>
                           )}
                         </div>
