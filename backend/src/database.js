@@ -117,6 +117,41 @@ function init() {
           console.log('TimeEntries table created or already exists.');
         });
 
+        // Bills Table — snapshot of a bill at creation time (task hours/financials frozen)
+        db.run(`
+          CREATE TABLE IF NOT EXISTS Bills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            projectId INTEGER NOT NULL,
+            totalHours REAL DEFAULT 0,
+            roundedHours REAL DEFAULT 0,
+            hourlyRate REAL DEFAULT 0,
+            subtotal REAL DEFAULT 0,
+            gst REAL DEFAULT 0,
+            total REAL DEFAULT 0,
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (projectId) REFERENCES Projects(id) ON DELETE CASCADE
+          )
+        `, (err) => {
+          if (err) return reject(err);
+          console.log('Bills table created or already exists.');
+        });
+
+        // BillTasks Table — per-task snapshot within a bill (name/hours frozen at billing time)
+        db.run(`
+          CREATE TABLE IF NOT EXISTS BillTasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            billId INTEGER NOT NULL,
+            taskId INTEGER,
+            taskName TEXT,
+            hoursSpent REAL DEFAULT 0,
+            FOREIGN KEY (billId) REFERENCES Bills(id) ON DELETE CASCADE,
+            FOREIGN KEY (taskId) REFERENCES Tasks(id) ON DELETE SET NULL
+          )
+        `, (err) => {
+          if (err) return reject(err);
+          console.log('BillTasks table created or already exists.');
+        });
+
         // Triggers to update `updatedAt` timestamps (Optional but good practice)
         const tablesWithUpdatedAt = ['Clients', 'Projects', 'Tasks', 'TimeEntries'];
         tablesWithUpdatedAt.forEach(table => {

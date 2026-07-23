@@ -8,9 +8,13 @@ docker compose up --build        # Build + start both services
 docker compose up --build -d     # Detached mode
 
 # Local dev (faster iteration)
-cd backend; npm run dev          # Terminal 1 — nodemon on :3001
+# Root .env holds the Docker DATABASE_PATH (/data/...) which doesn't exist on Windows —
+# override it before starting the backend or it crashes with SQLITE_CANTOPEN:
+cd backend; $env:DATABASE_PATH = "$(git rev-parse --show-toplevel)\data\notion_time_tracker.sqlite"; npm run dev   # Terminal 1 — nodemon on :3001
 cd frontend; npm run dev         # Terminal 2 — Vite on :3000, proxies /api → :3001
 ```
+
+The local `data/notion_time_tracker.sqlite` is a stale dev snapshot — production data lives on the Railway volume.
 
 ## Platform Notes
 
@@ -25,7 +29,7 @@ cd frontend; npm run dev         # Terminal 2 — Vite on :3000, proxies /api �
 | Backend | Node.js, Express 5 | 3001 |
 | Database | SQLite (file-based) | — |
 | External | Notion API (@notionhq/client 3.x) | — |
-| Auth | Simple password via `APP_PASSWORD` env var | — |
+| Auth | Password via `APP_PASSWORD` → stateless HMAC-signed tokens (30-day expiry) | — |
 
 Notion is the source of truth for clients/projects/tasks. The local SQLite DB is a cache + stores time entries. Sync is manual (triggered by user).
 
@@ -33,9 +37,10 @@ Notion is the source of truth for clients/projects/tasks. The local SQLite DB is
 
 ```
 backend/src/
-  app.js              — Express entry point + auth middleware
+  app.js              — Express entry point + auth (stateless HMAC tokens, see below)
   database.js         — SQLite schema + migrations (ALTER TABLE ADD COLUMN style)
   routes/index.js     — Router mount
+  routes/projects.js  — Project CRUD + billing + Bills endpoints (create/list/delete)
   routes/tasks.js     — Task queries (Quick Start, filtering)
   routes/timeEntries.js — Timer start/stop/CRUD
   routes/sync.js      — Notion sync orchestration
@@ -47,7 +52,8 @@ frontend/src/
   contexts/TimerContext.jsx — Active timer state, favicon, doc title
   contexts/ToastContext.jsx — Toast notifications + undo
   pages/HomePage.jsx  — Dashboard: Quick Start + Timeline
-  components/TimelineView.jsx — Day timeline (drag, resize, create entries)
+  components/TimelineView.jsx — Day timeline (drag, resize, create, zoom, live timer entry)
+  components/PreviousBillsSection.jsx — Bill history with task breakdowns (project page)
   components/DopamineTimer.jsx — XP/level gamified timer
   utils/timeUtils.js  — Date helpers (Pacific/Auckland timezone)
 
@@ -62,16 +68,19 @@ Clients (id, notionId, name, status)
   → Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color)
     → Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage)
       → TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
+    → Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, createdAt)
+      → BillTasks (id, billId, taskId, taskName, hoursSpent)
 ```
 
 - `notionId` = Notion page UUID (UNIQUE, used for sync dedup)
 - `duration` is in seconds
-- Timestamps are ISO 8601 strings
+- Timestamps are ISO 8601 strings storing **NZ wall-clock time labeled as UTC** (see Timezone below)
 - FKs (`clientId`, `projectId`) resolved by `updateLocalRelationalIds()` after sync
+- `Bills`/`BillTasks` are **snapshots** taken at billing time (task names, hours, financials frozen) so history survives task renames/deletions. Financials are computed server-side in `projects.js`. Deleting a bill un-bills its tasks (that's how undo works).
 
 ## Important Conventions
 
-- **Timezone**: All date logic uses `Pacific/Auckland` (NZ). Check boundary logic carefully.
+- **Timezone**: All date logic uses `Pacific/Auckland` (NZ). Timestamps are stored as NZ wall-clock time encoded as UTC ISO strings (`getNZTimestamp()` pattern), so display them with `timeZone: 'UTC'` to avoid double-shifting. Check boundary logic carefully.
 - **Currency**: NZD with 15% GST. Time rounded up to nearest 0.25 hrs for billing.
 - **Assignee filter**: `tasks.js` filters by `'%Josue Munro%'` (hardcoded).
 - **Icon caching**: Notion file URLs expire ~1hr, so icons download to `backend/assets/icons/` on sync.
@@ -85,7 +94,8 @@ Clients (id, notionId, name, status)
 - **CI/CD**: Auto-deploys on push to `master`
 - **Persistent volume**: Mounted at `/data` for SQLite file
 - **Port**: Railway injects `PORT` env var (used over `BACKEND_PORT`)
-- **Auth**: `APP_PASSWORD` env var — single password for the whole site
+- **Auth**: `APP_PASSWORD` env var — single password for the whole site. Login issues **stateless HMAC-signed tokens** (secret derived from `APP_PASSWORD`, 30-day expiry) so sessions survive restarts, redeploys, and App Sleeping. Changing `APP_PASSWORD` invalidates all sessions.
+- **App Sleeping**: Enabled on Railway (scales to zero when idle). Restarts are invisible to auth, but anything held only in backend memory dies with each sleep — persist state to `/data` or make it stateless.
 - **DNS**: CNAME `timer.webdune.co.nz` → Railway-provided target (SSL auto-provisioned)
 
 ## Environment Variables

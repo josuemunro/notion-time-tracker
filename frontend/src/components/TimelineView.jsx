@@ -1,6 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+// TimelineView version log
+// v1.3 — Zoomable timeline: Ctrl/Cmd+scroll (cursor-anchored) or header buttons, 20–240px/hr;
+//        snap increments scale with zoom; sub-28px entries render as a bar with the icon above;
+//        loading screen only on first load (refetches no longer unmount the timeline)
+// v1.2 — Render the running timer as a live breathing entry that grows in real time;
+//        refresh entries on timer start as well as stop (auto-stopped timers appear immediately)
+// v1.1 — Fix stuck drag tooltip after moving an entry (mouseup removed the wrong
+//        mousemove listener: handleMainMouseMove instead of the attached trackingWrapper)
+// v1.0 — Baseline: drag/resize/create/delete entries, hover preview, current-time line
+
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { getTimeEntries, updateTimeEntry, deleteTimeEntry, addManualTimeEntry } from '../services/api';
-import { formatHoursHuman, formatDurationHuman, formatNZTime, formatNZTimeRange, getNZDateString, getNZHoursDecimal } from '../utils/timeUtils';
+import { formatHoursHuman, formatDurationHuman, formatNZTime, formatNZTimeRange, getNZDateString, getNZHoursDecimal, formatTimerDisplay } from '../utils/timeUtils';
 import ProjectIcon from './ProjectIcon';
 import TaskSelectionModal from './TaskSelectionModal';
 import { useTimer } from '../contexts/TimerContext';
@@ -39,17 +49,51 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
   const timelineRef = useRef(null);
   const hasDraggedRef = useRef(false); // Use ref for immediate drag detection
 
-  // Get timer context to register for stop events
-  const { registerTimerStopCallback } = useTimer();
+  // Get timer context: change events for refreshing, active timer for the live entry
+  const { registerTimerChangeCallback, activeTimerDetails, elapsedTime } = useTimer();
 
   // Timeline constants
-  const HOUR_WIDTH = 80; // pixels per hour
+  const ZOOM_LEVELS = [20, 30, 40, 60, 80, 120, 160, 240]; // pixels per hour
+  const DEFAULT_ZOOM_INDEX = 4; // 80px/hr
+  const [zoomIndex, setZoomIndex] = useState(DEFAULT_ZOOM_INDEX);
+  const HOUR_WIDTH = ZOOM_LEVELS[zoomIndex]; // pixels per hour (zoom-dependent)
   const START_HOUR = 0; // 12 AM (midnight)
   const END_HOUR = 23; // 11 PM
   const TIMELINE_HOURS = END_HOUR - START_HOUR + 1; // Include hour 23 (11 PM to midnight)
-  const SNAP_MINUTES = 5; // Snap to 5-minute increments
+  // Snap step scales with zoom: finest increment that still spans ≥4px of mouse travel
+  const SNAP_MINUTES = [1, 5, 10, 15, 30].find(m => (HOUR_WIDTH / 60) * m >= 4) || 30;
   const TIMELINE_HEIGHT = 120; // Height of the timeline track
   const DEFAULT_DURATION_HOURS = 1; // Default 1 hour for new entries
+
+  const scrollContainerRef = useRef(null);
+  const pendingZoomAnchor = useRef(null); // { timeHours, offsetX } — keeps this time under the cursor across a zoom
+  const applyZoomRef = useRef(null);
+
+  const applyZoom = (newIndex, anchorClientX = null) => {
+    const clamped = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, newIndex));
+    if (clamped === zoomIndex) return;
+    const container = scrollContainerRef.current;
+    if (container) {
+      const rect = container.getBoundingClientRect();
+      const offsetX = anchorClientX !== null ? anchorClientX - rect.left : rect.width / 2;
+      pendingZoomAnchor.current = {
+        timeHours: (container.scrollLeft + offsetX) / HOUR_WIDTH,
+        offsetX,
+      };
+    }
+    setZoomIndex(clamped);
+  };
+  applyZoomRef.current = applyZoom;
+
+  // Restore scroll so the anchored time stays put after the zoom re-render
+  useLayoutEffect(() => {
+    const anchor = pendingZoomAnchor.current;
+    const container = scrollContainerRef.current;
+    if (anchor && container) {
+      container.scrollLeft = anchor.timeHours * HOUR_WIDTH - anchor.offsetX;
+      pendingZoomAnchor.current = null;
+    }
+  }, [zoomIndex]);
 
   const [currentTimePixels, setCurrentTimePixels] = useState(null);
 
@@ -64,21 +108,38 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
     updateCurrentTime();
     const interval = setInterval(updateCurrentTime, 30000);
     return () => clearInterval(interval);
-  }, [selectedDate]);
+  }, [selectedDate, HOUR_WIDTH]);
+
+  const zoomIndexRef = useRef(zoomIndex);
+  zoomIndexRef.current = zoomIndex;
+
+  // Ctrl/Cmd + scroll to zoom, anchored on the cursor (native listener: React's
+  // onWheel can't preventDefault reliably)
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      applyZoomRef.current(zoomIndexRef.current + (e.deltaY < 0 ? 1 : -1), e.clientX);
+    };
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => container.removeEventListener('wheel', onWheel);
+  }, [isLoading]);
 
   useEffect(() => {
     fetchTimeEntries();
   }, [selectedDate]);
 
-  // Register callback to refresh timeline when timer stops
+  // Register callback to refresh timeline when a timer starts or stops
   useEffect(() => {
-    const unregister = registerTimerStopCallback(() => {
-      console.log('🔄 Timer stopped, refreshing timeline...');
+    const unregister = registerTimerChangeCallback(() => {
+      console.log('🔄 Timer changed, refreshing timeline...');
       fetchTimeEntries();
     });
 
     return unregister; // Cleanup callback on unmount
-  }, [registerTimerStopCallback]);
+  }, [registerTimerChangeCallback]);
 
   // Clear delete mode when clicking outside and cleanup drag states
   useEffect(() => {
@@ -219,6 +280,17 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
     return utcDate.toISOString();
   };
 
+  // Effective right edge of an entry in pixels — running entries grow to "now"
+  const getEntryEndPixels = (entry) => {
+    if (entry.endTime) return timeToPixels(entry.endTime);
+    const startPixels = timeToPixels(entry.startTime);
+    if (activeTimerDetails?.timeEntryId === entry.timeEntryId) {
+      return startPixels + (elapsedTime / 3600) * HOUR_WIDTH;
+    }
+    if (currentTimePixels !== null) return Math.max(startPixels, currentTimePixels);
+    return startPixels;
+  };
+
   // Check for overlaps and find insertion position
   const findInsertionPosition = (startPixels, endPixels, excludeEntryId = null) => {
     const overlappingEntries = timeEntries.filter(entry => {
@@ -304,9 +376,9 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
     // Check if hovering over an existing entry or its drag handles
     const isOverEntry = timeEntries.some(entry => {
-      if (!entry?.startTime || !entry?.endTime) return false;
+      if (!entry?.startTime) return false;
       const startPixels = timeToPixels(entry.startTime);
-      const endPixels = timeToPixels(entry.endTime);
+      const endPixels = getEntryEndPixels(entry);
       // Include the drag handle areas (5px on each side) and expand Y range slightly
       return relativeX >= startPixels - 5 && relativeX <= endPixels + 5 &&
         relativeY >= 35 && relativeY <= 105;
@@ -350,9 +422,9 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
     // Check if clicking on an existing entry
     const clickedEntry = timeEntries.find(entry => {
-      if (!entry?.startTime || !entry?.endTime) return false;
+      if (!entry?.startTime) return false;
       const startPixels = timeToPixels(entry.startTime);
-      const endPixels = timeToPixels(entry.endTime);
+      const endPixels = getEntryEndPixels(entry);
       const relativeX = e.clientX - timelineRect.left;
       return relativeX >= startPixels && relativeX <= endPixels &&
         relativeY >= 40 && relativeY <= 100;
@@ -685,10 +757,70 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
     document.addEventListener('mouseup', handleMouseUp);
   };
 
+  // Render the currently running timer as a live, breathing, non-interactive entry
+  const renderActiveEntry = (entry) => {
+    const startPixels = timeToPixels(entry.startTime);
+    const endPixels = getEntryEndPixels(entry);
+    const width = Math.max(24, endPixels - startPixels);
+
+    if (startPixels > TIMELINE_HOURS * HOUR_WIDTH || endPixels < 0) return null;
+
+    const projectColor = entry.projectColor || '#6366f1';
+    const textColor = getOptimalTextColor(projectColor);
+    const isThisActive = activeTimerDetails?.timeEntryId === entry.timeEntryId;
+    const liveSeconds = isThisActive
+      ? elapsedTime
+      : Math.max(0, Math.round(((endPixels - startPixels) / HOUR_WIDTH) * 3600));
+    const showText = width >= 90;
+
+    return (
+      <div
+        key={entry.timeEntryId}
+        data-entry-id={entry.timeEntryId}
+        className="absolute rounded-lg shadow-md z-10 pointer-events-none animate-timeline-breathe"
+        style={{
+          left: `${Math.max(0, startPixels)}px`,
+          width: `${width}px`,
+          top: '40px',
+          height: '60px',
+          backgroundColor: projectColor,
+        }}
+      >
+        <div className={`p-2 h-full flex items-center ${textColor}`}>
+          {showText ? (
+            <div className="flex items-center space-x-2 w-full">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse flex-shrink-0" />
+              <ProjectIcon
+                iconType={entry.projectIconType}
+                iconValue={entry.projectIconValue}
+                projectName={entry.projectName}
+                projectColor={entry.projectColor}
+                className="w-5 h-5 flex-shrink-0"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="font-medium truncate text-xs">{entry.taskName}</div>
+                <div className="text-xs opacity-80 tabular-nums">{formatTimerDisplay(liveSeconds)}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="w-full flex items-center justify-center">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderTimeEntry = (entry) => {
-    if (!entry || !entry.endTime || !entry.startTime) {
+    if (!entry || !entry.startTime) {
       console.warn('🚫 Invalid entry in renderTimeEntry:', entry);
       return null;
+    }
+
+    // Running entry (no endTime yet) renders as the live breathing entry
+    if (!entry.endTime) {
+      return renderActiveEntry(entry);
     }
 
     // Don't render the entry being drag-previewed
@@ -710,7 +842,8 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
     const textColor = getOptimalTextColor(projectColor);
 
     // Determine layout based on width
-    const showOnlyIcon = width < 50;
+    const showIconAbove = width < 28; // Too narrow to hold the icon — float it above the bar
+    const showOnlyIcon = width >= 28 && width < 50;
     const showIconAndTask = width >= 50 && width < 150;
     const showFullInfo = width >= 150;
 
@@ -841,7 +974,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
             setDragState(null);
             setDragTooltip(null);
             setDragPreview(null);
-            document.removeEventListener('mousemove', handleMainMouseMove);
+            document.removeEventListener('mousemove', trackingWrapper);
             document.removeEventListener('mouseup', handleMainMouseUp);
 
             // Only proceed with update if user actually dragged
@@ -953,7 +1086,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
           ${isInDeleteMode ? 'ring-4 ring-red-500 bg-red-100 border-2 border-red-600' : 'hover:shadow-md'}`}
         style={{
           left: `${Math.max(0, startPixels)}px`,
-          width: `${Math.max(40, width)}px`,
+          width: `${Math.max(8, width)}px`,
           top: '40px',
           height: '60px',
           backgroundColor: isInDeleteMode ? 'transparent' : projectColor,
@@ -962,14 +1095,27 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
       >
         {/* Delete mode overlay - positioned absolutely over entire entry */}
         {isInDeleteMode && (
-          <div className="absolute inset-0 flex items-center justify-center bg-red-500 text-white rounded-lg font-bold text-sm z-50 border-2 border-red-700 pointer-events-auto">
-            🗑️ DELETE?
+          <div className="absolute inset-0 flex items-center justify-center bg-red-500 text-white rounded-lg font-bold text-sm z-50 border-2 border-red-700 pointer-events-auto overflow-hidden whitespace-nowrap">
+            {width >= 100 ? '🗑️ DELETE?' : '🗑️'}
+          </div>
+        )}
+
+        {/* Icon floated above the bar when the entry is too narrow to hold it */}
+        {showIconAbove && !isInDeleteMode && (
+          <div className="absolute -top-7 left-1/2 -translate-x-1/2 pointer-events-none z-20">
+            <ProjectIcon
+              iconType={entry.projectIconType}
+              iconValue={entry.projectIconValue}
+              projectName={entry.projectName}
+              projectColor={entry.projectColor}
+              className="w-5 h-5"
+            />
           </div>
         )}
 
         {/* Content based on width - pointer-events-none to allow drag handles to work, hidden when in delete mode */}
-        <div className={`p-2 h-full flex items-center ${textColor} pointer-events-none relative z-10 ${isInDeleteMode ? 'invisible' : ''}`}>
-          {showOnlyIcon ? (
+        <div className={`p-2 h-full flex items-center ${textColor} pointer-events-none relative z-10 ${isInDeleteMode || showIconAbove ? 'invisible' : ''}`}>
+          {showOnlyIcon || showIconAbove ? (
             // Only icon for very narrow entries (< 50px)
             <div className="w-full flex items-center justify-center">
               <ProjectIcon
@@ -1108,15 +1254,20 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
     return labels;
   };
 
-  // Calculate total time for the day
+  // Calculate total time for the day (running timer counts live)
   const calculateDayTotal = () => {
     const totalSeconds = timeEntries.reduce((sum, entry) => {
+      if (!entry.endTime && activeTimerDetails?.timeEntryId === entry.timeEntryId) {
+        return sum + elapsedTime;
+      }
       return sum + (entry.duration || 0);
     }, 0);
     return formatDurationHuman(totalSeconds);
   };
 
-  if (isLoading) {
+  // Only block rendering on the very first load — refetches (timer start/stop,
+  // drag updates) keep the timeline mounted so it doesn't flicker
+  if (isLoading && timeEntries.length === 0) {
     return (
       <div className="flex justify-center items-center h-32">
         <div className="text-gray-500">Loading timeline...</div>
@@ -1142,14 +1293,42 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
               )}
             </p>
           </div>
-          <div className="text-right">
-            <div className="text-2xl font-bold text-blue-600">{calculateDayTotal()}</div>
-            <div className="text-sm text-gray-500">Total logged</div>
+          <div className="flex items-center space-x-4">
+            {/* Zoom controls */}
+            <div className="flex items-center space-x-1 bg-gray-100 rounded-lg px-1 py-1">
+              <button
+                onClick={() => applyZoom(zoomIndex - 1)}
+                disabled={zoomIndex === 0}
+                className="px-2 py-1 text-gray-600 hover:bg-gray-200 rounded disabled:opacity-30 disabled:cursor-not-allowed font-bold"
+                title="Zoom out (Ctrl+scroll)"
+              >
+                −
+              </button>
+              <button
+                onClick={() => applyZoom(DEFAULT_ZOOM_INDEX)}
+                className="px-1.5 py-1 text-xs text-gray-500 hover:bg-gray-200 rounded tabular-nums w-12 text-center"
+                title="Reset zoom"
+              >
+                {Math.round((HOUR_WIDTH / ZOOM_LEVELS[DEFAULT_ZOOM_INDEX]) * 100)}%
+              </button>
+              <button
+                onClick={() => applyZoom(zoomIndex + 1)}
+                disabled={zoomIndex === ZOOM_LEVELS.length - 1}
+                className="px-2 py-1 text-gray-600 hover:bg-gray-200 rounded disabled:opacity-30 disabled:cursor-not-allowed font-bold"
+                title="Zoom in (Ctrl+scroll)"
+              >
+                +
+              </button>
+            </div>
+            <div className="text-right">
+              <div className="text-2xl font-bold text-blue-600">{calculateDayTotal()}</div>
+              <div className="text-sm text-gray-500">Total logged</div>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="p-4 overflow-x-auto">
+      <div className="p-4 overflow-x-auto" ref={scrollContainerRef}>
         <div
           ref={timelineRef}
           className="relative cursor-crosshair"
@@ -1187,8 +1366,8 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
                 height: '60px',
               }}
             >
-              <div className="p-2 h-full flex items-center justify-center text-blue-600 text-xs font-medium">
-                Click to create 1h task
+              <div className="p-2 h-full flex items-center justify-center text-blue-600 text-xs font-medium overflow-hidden whitespace-nowrap">
+                {DEFAULT_DURATION_HOURS * HOUR_WIDTH >= 120 ? 'Click to create 1h task' : '+1h'}
               </div>
             </div>
           )}

@@ -88,16 +88,16 @@ export const TimerProvider = ({ children }) => {
   const [activeTimerDetails, setActiveTimerDetails] = useState(null); // Stores { timeEntryId, taskId, taskName, projectName, startTime }
   const [elapsedTime, setElapsedTime] = useState(0); // in seconds
   const [isLoading, setIsLoading] = useState(true);
-  const [timerStopCallbacks, setTimerStopCallbacks] = useState([]); // Callbacks to call when timer stops
+  const [timerChangeCallbacks, setTimerChangeCallbacks] = useState([]); // Callbacks to call when a timer starts or stops
   const [faviconBreathing, setFaviconBreathing] = useState(false); // For breathing animation
   const [originalFaviconHref, setOriginalFaviconHref] = useState(null); // Store original favicon
 
-  // Function to register callbacks for timer stop events
-  const registerTimerStopCallback = useCallback((callback) => {
-    setTimerStopCallbacks(prev => [...prev, callback]);
+  // Function to register callbacks for timer start/stop events
+  const registerTimerChangeCallback = useCallback((callback) => {
+    setTimerChangeCallbacks(prev => [...prev, callback]);
     // Return unregister function
     return () => {
-      setTimerStopCallbacks(prev => prev.filter(cb => cb !== callback));
+      setTimerChangeCallbacks(prev => prev.filter(cb => cb !== callback));
     };
   }, []);
 
@@ -214,6 +214,16 @@ export const TimerProvider = ({ children }) => {
         startTime: newTimer.startTime,
       });
       // No need to call fetchCurrentActiveTimer here as we've set it directly
+
+      // Notify listeners (e.g. timeline) — starting a timer may have auto-stopped
+      // the previous one on the backend, so views need to refresh
+      timerChangeCallbacks.forEach(callback => {
+        try {
+          callback();
+        } catch (error) {
+          console.error('Error calling timer change callback:', error);
+        }
+      });
     } catch (error) {
       console.error("Failed to start timer:", error);
       // Optionally, refetch active timer to ensure UI consistency
@@ -235,11 +245,11 @@ export const TimerProvider = ({ children }) => {
       setFaviconBreathing(false);
 
       // Call all registered callbacks when timer stops
-      timerStopCallbacks.forEach(callback => {
+      timerChangeCallbacks.forEach(callback => {
         try {
           callback();
         } catch (error) {
-          console.error('Error calling timer stop callback:', error);
+          console.error('Error calling timer change callback:', error);
         }
       });
     } catch (error) {
@@ -280,7 +290,7 @@ export const TimerProvider = ({ children }) => {
       stopTimer,
       isLoadingTimer: isLoading,
       refreshActiveTimer: fetchCurrentActiveTimer,
-      registerTimerStopCallback, // Expose callback registration
+      registerTimerChangeCallback, // Expose callback registration (fires on start and stop)
     }}>
       {children}
     </TimerContext.Provider>

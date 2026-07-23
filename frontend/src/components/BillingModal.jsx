@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { XMarkIcon, ClipboardIcon, CheckIcon } from '@heroicons/react/24/solid';
 import { formatHoursHuman } from '../utils/timeUtils';
-import { updateTasksBillingStatus } from '../services/api';
+import { createBill, deleteBill } from '../services/api';
 import { useToast } from '../contexts/ToastContext';
 
 function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
@@ -43,14 +43,15 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
     setIsUpdating(true);
     try {
       const taskIds = selectedTasks.map(task => task.id);
-      await updateTasksBillingStatus(project.id, taskIds, true);
+      // Creates a Bill record (snapshot of hours + financials) and marks tasks billed
+      const { data: bill } = await createBill(project.id, taskIds);
 
-      // Show undo toast
+      // Show undo toast — undo deletes the bill and un-bills its tasks
       showUndo(
         `Bill completed for ${selectedTasks.length} task${selectedTasks.length !== 1 ? 's' : ''}`,
         async () => {
           try {
-            await updateTasksBillingStatus(project.id, taskIds, false);
+            await deleteBill(project.id, bill.billId);
             onCompleted(taskIds); // Refresh the data
           } catch (error) {
             console.error('Failed to undo billing:', error);

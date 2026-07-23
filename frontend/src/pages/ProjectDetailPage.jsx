@@ -5,6 +5,7 @@ import TaskItem from '../components/common/TaskItem';
 import ProjectIcon from '../components/ProjectIcon';
 import BillingOverview from '../components/BillingOverview';
 import UnbilledTasksSection from '../components/UnbilledTasksSection';
+import PreviousBillsSection from '../components/PreviousBillsSection';
 import { ArrowPathIcon, ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/solid';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { useTimer } from '../contexts/TimerContext'; // Import useTimer
@@ -23,6 +24,7 @@ function ProjectDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [hexInput, setHexInput] = useState('');
   const [rateInput, setRateInput] = useState(''); // Add separate state for rate input
+  const [billsRefreshToken, setBillsRefreshToken] = useState(0); // Bump to refetch Previous Bills
   const { startTimer, activeTimerDetails, isRunning } = useTimer(); // Get timer functions
   const prevIsRunningRef = useRef(isRunning); // Track previous isRunning state
   const isFetchingRef = useRef(false); // Track if already fetching to prevent concurrent calls
@@ -103,6 +105,7 @@ function ProjectDetailPage() {
   const handleTasksBilled = async (taskIds) => {
     // Refresh project data after billing tasks
     await fetchProject(true); // Skip input update when refreshing after billing
+    setBillsRefreshToken(prev => prev + 1); // Refetch Previous Bills (also fires on undo)
   };
 
   const handleDeleteProject = async () => {
@@ -315,6 +318,7 @@ function ProjectDetailPage() {
         onTasksBilled={handleTasksBilled}
         onRefresh={() => fetchProject(true)}
       />
+      <PreviousBillsSection project={project} refreshToken={billsRefreshToken} />
 
       <div>
         <h2 className="text-2xl font-semibold text-gray-800 mb-4">Tasks</h2>

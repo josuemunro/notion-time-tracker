@@ -67,7 +67,8 @@ notion-time-tracker/
         │   ├── TaskSelectionModal.jsx   # Pick task for manual entry
         │   ├── BillingOverview.jsx      # Billed / unbilled summary
         │   ├── UnbilledTasksSection.jsx # Select + preview billing
-        │   └── BillingModal.jsx         # Final bill with copy/undo
+        │   ├── BillingModal.jsx         # Final bill with copy/undo
+        │   └── PreviousBillsSection.jsx # Bill history with task breakdowns
         └── utils/
             └── timeUtils.js   # Date helpers (NZ timezone)
 ```
@@ -96,6 +97,12 @@ cd frontend && npm run dev       # Vite on port 3000, proxies /api → :3001
 ```
 
 Both approaches work. Docker is closer to production; local dev gives hot reload.
+
+**Windows local dev gotcha**: the root `.env` sets `DATABASE_PATH=/data/...` (the Docker/Railway path), which crashes the backend locally with `SQLITE_CANTOPEN`. Pre-set the env var before starting (dotenv won't override it):
+
+```powershell
+$env:DATABASE_PATH = "<repo>\data\notion_time_tracker.sqlite"; npm run dev
+```
 
 ---
 
@@ -168,6 +175,9 @@ Active timer check: `GET /api/time-entries/active` (returns entry where endTime 
 | GET | `/api/projects/:id` | Project detail + tasks |
 | PUT | `/api/projects/:id` | Update `color` (hex) and/or `hourlyRate` |
 | PUT | `/api/projects/:id/tasks/billing` | Bulk set `beenBilled` for `taskIds[]` |
+| POST | `/api/projects/:id/bills` | Create bill snapshot from `taskIds[]`; computes hours/GST server-side, marks tasks billed |
+| GET | `/api/projects/:id/bills` | List bills (newest first) with task snapshots |
+| DELETE | `/api/projects/:id/bills/:billId` | Delete bill + un-bill its tasks (undo) |
 | POST | `/api/projects/test` | Create test project + sample tasks |
 | DELETE | `/api/projects/:id` | Cascade delete project, tasks, time entries |
 
@@ -205,9 +215,13 @@ Active timer check: `GET /api/time-entries/active` (returns entry where endTime 
 ```
 Clients (id, notionId, name, status)
   └── Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color)
-        └── Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage)
-              └── TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
+        ├── Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage)
+        │     └── TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
+        └── Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, createdAt)
+              └── BillTasks (id, billId, taskId, taskName, hoursSpent)
 ```
+
+`Bills`/`BillTasks` are snapshots frozen at billing time — task names and hours are copied in so bill history survives task renames and deletions. Deleting a bill resets `beenBilled` on its tasks.
 
 - `notionId` columns are the Notion page UUIDs, used for sync deduplication (UNIQUE constraint)
 - `notionClientId` / `notionProjectId` store the raw Notion relation IDs; `clientId` / `projectId` are resolved local FKs (updated by `updateLocalRelationalIds()` after each sync)
@@ -245,12 +259,13 @@ The Notion integration expects these exact property names:
 
 ## Key Design Decisions
 
-1. **Timezone**: All date logic uses `Pacific/Auckland` (NZ time). See `utils/timeUtils.js`.
+1. **Timezone**: All date logic uses `Pacific/Auckland` (NZ time). See `utils/timeUtils.js`. Timestamps are stored as **NZ wall-clock time encoded as UTC ISO strings** (`getNZTimestamp()` pattern) — format them with `timeZone: 'UTC'` when displaying to avoid double-shifting.
 2. **Currency**: NZD with 15% GST for billing calculations.
 3. **Billing rounding**: Time is rounded up to nearest 0.25 hours.
-4. **Icon caching**: Notion file URLs expire after ~1 hour, so project icons are downloaded to `backend/assets/icons/` on sync and served statically.
-5. **No auth**: Single-user app, no authentication layer.
+4. **Icon caching**: Notion file URLs expire after ~1 hour, so project icons are downloaded on sync and served statically (from the `/data` volume in production).
+5. **Auth**: Single password (`APP_PASSWORD`). Login issues stateless HMAC-signed tokens (secret derived from `APP_PASSWORD`, 30-day expiry) verified in `app.js` — no server-side session state, so sessions survive restarts, redeploys, and Railway App Sleeping. Changing `APP_PASSWORD` invalidates all tokens. No password set = auth disabled (local dev).
 6. **No auto-sync**: Sync is manual to avoid Notion rate limits.
+7. **Statelessness matters**: Railway App Sleeping stops the process when idle, so never keep durable state only in backend memory — persist to SQLite on `/data` or make it derivable (like the auth tokens).
 
 ---
 
@@ -268,18 +283,17 @@ The Notion integration expects these exact property names:
 
 The `TimelineView` is the most complex component. Key behaviors:
 
-- **Drag handles** (blue) on top/bottom edges resize entries
+- **Drag handles** (blue) on left/right edges resize entries
 - **Drag center** moves entries
 - **Click empty area** opens `TaskSelectionModal` to create a manual entry
 - **Click existing entry** shows delete option
+- **Zoom**: Ctrl/Cmd+scroll (cursor-anchored) or header −/+ buttons, 20–240 px/hr; snap increments scale with zoom (finest step ≥4px of mouse travel); entries under 28px render as a bar with the project icon floated above
+- **Live timer entry**: the running timer renders as a breathing, non-interactive entry that grows every second (driven by `TimerContext.elapsedTime`)
+- **Real-time refresh**: `TimerContext.registerTimerChangeCallback` fires on timer start *and* stop, so auto-stopped timers appear immediately; the loading screen only shows on first load (refetches keep the timeline mounted)
 - All changes persist to the backend immediately
 - Uses refs for drag state to avoid stale closures
 
-When making timeline changes, update the version log at the top of `TimelineView.jsx`:
-
-```js
-console.log("🕒 TimelineView last updated @ <date> — <description>");
-```
+When making timeline changes, update the version log comment block at the top of `TimelineView.jsx` (v1.x entries describing each change).
 
 ---
 
@@ -289,6 +303,7 @@ console.log("🕒 TimelineView last updated @ <date> — <description>");
 BACKEND_PORT=3001
 FRONTEND_PORT=3000
 DATABASE_PATH=/data/notion_time_tracker.sqlite
+APP_PASSWORD=<required in production; unset = auth disabled>
 
 NOTION_API_KEY=secret_...
 NOTION_CLIENTS_DB_ID=<uuid>

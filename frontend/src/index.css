@@ -4,3 +4,12 @@
 body {
   font-family: 'Inter', sans-serif; /* Example: Using a nice sans-serif font */
 }
+
+/* Breathing opacity for the live (running) entry on the timeline */
+@keyframes timeline-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+.animate-timeline-breathe {
+  animation: timeline-breathe 2.4s ease-in-out infinite;
+}

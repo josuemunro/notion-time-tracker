@@ -62,6 +62,11 @@ export const updateProject = (projectId, projectData) => apiClient.put(`/project
 export const updateTasksBillingStatus = (projectId, taskIds, beenBilled) =>
   apiClient.put(`/projects/${projectId}/tasks/billing`, { taskIds, beenBilled });
 export const createTestProject = () => apiClient.post('/projects/test');
+
+// Bills
+export const createBill = (projectId, taskIds) => apiClient.post(`/projects/${projectId}/bills`, { taskIds });
+export const getProjectBills = (projectId) => apiClient.get(`/projects/${projectId}/bills`);
+export const deleteBill = (projectId, billId) => apiClient.delete(`/projects/${projectId}/bills/${billId}`);
 export const deleteProject = (projectId) => apiClient.delete(`/projects/${projectId}`);
 
 // Tasks

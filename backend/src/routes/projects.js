@@ -3,6 +3,17 @@ const express = require('express');
 const router = express.Router();
 const database = require('../database'); // Import the database module
 
+// NZ wall-clock time encoded as a UTC ISO string (app-wide timestamp convention)
+function getNZTimestamp() {
+  const now = new Date();
+  const nzStr = now.toLocaleString('en-US', { timeZone: 'Pacific/Auckland' });
+  const nzDate = new Date(nzStr);
+  return new Date(Date.UTC(
+    nzDate.getFullYear(), nzDate.getMonth(), nzDate.getDate(),
+    nzDate.getHours(), nzDate.getMinutes(), nzDate.getSeconds()
+  )).toISOString();
+}
+
 // GET /api/projects - Get all projects with aggregated time and client info
 router.get('/', async (req, res, next) => {
   const db = database.getDb(); // Get db instance inside the handler
@@ -296,6 +307,145 @@ router.put('/:projectId/tasks/billing', async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+// POST /api/projects/:projectId/bills - Create a bill snapshot and mark its tasks as billed
+router.post('/:projectId/bills', (req, res, next) => {
+  const db = database.getDb();
+  const { projectId } = req.params;
+  const { taskIds } = req.body;
+
+  if (!Array.isArray(taskIds) || taskIds.length === 0) {
+    return res.status(400).json({ message: 'taskIds array is required and cannot be empty.' });
+  }
+
+  db.get(`SELECT id, hourlyRate FROM Projects WHERE id = ? OR notionId = ?`, [projectId, projectId], (err, project) => {
+    if (err) return next(err);
+    if (!project) return res.status(404).json({ message: 'Project not found.' });
+
+    const placeholders = taskIds.map(() => '?').join(',');
+    // Snapshot each task's name and hours at billing time
+    const tasksQuery = `
+      SELECT t.id, t.name, COALESCE(SUM(te.duration), 0) / 3600.0 AS hoursSpent
+      FROM Tasks t
+      LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
+      WHERE t.id IN (${placeholders}) AND t.projectId = ?
+      GROUP BY t.id, t.name
+    `;
+    db.all(tasksQuery, [...taskIds, project.id], (err, tasks) => {
+      if (err) return next(err);
+      if (tasks.length !== taskIds.length) {
+        return res.status(400).json({ message: 'Some tasks do not belong to this project.' });
+      }
+
+      // Same billing rules as the frontend: round total up to 0.25h, 15% GST
+      const totalHours = tasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
+      const roundedHours = Math.ceil(totalHours * 4) / 4;
+      const rate = project.hourlyRate || 0;
+      const subtotal = roundedHours * rate;
+      const gst = subtotal * 0.15;
+      const total = subtotal + gst;
+      const createdAt = getNZTimestamp();
+
+      db.serialize(() => {
+        db.run('BEGIN TRANSACTION;');
+        db.run(
+          `INSERT INTO Bills (projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [project.id, totalHours, roundedHours, rate, subtotal, gst, total, createdAt],
+          function (err) {
+            if (err) { db.run('ROLLBACK;'); return next(err); }
+            const billId = this.lastID;
+
+            const stmt = db.prepare(`INSERT INTO BillTasks (billId, taskId, taskName, hoursSpent) VALUES (?, ?, ?, ?)`);
+            tasks.forEach(t => stmt.run([billId, t.id, t.name, t.hoursSpent]));
+            stmt.finalize((err) => {
+              if (err) { db.run('ROLLBACK;'); return next(err); }
+
+              db.run(`UPDATE Tasks SET beenBilled = 1 WHERE id IN (${placeholders})`, taskIds, (err) => {
+                if (err) { db.run('ROLLBACK;'); return next(err); }
+                db.run('COMMIT;', (err) => {
+                  if (err) return next(err);
+                  console.log(`Bill ${billId} created for project ${project.id} with ${tasks.length} tasks.`);
+                  res.status(201).json({
+                    message: 'Bill created successfully.',
+                    billId, createdAt, totalHours, roundedHours,
+                    hourlyRate: rate, subtotal, gst, total,
+                    tasks
+                  });
+                });
+              });
+            });
+          }
+        );
+      });
+    });
+  });
+});
+
+// GET /api/projects/:projectId/bills - List bills (newest first) with their task snapshots
+router.get('/:projectId/bills', (req, res, next) => {
+  const db = database.getDb();
+  const { projectId } = req.params;
+
+  db.get(`SELECT id FROM Projects WHERE id = ? OR notionId = ?`, [projectId, projectId], (err, project) => {
+    if (err) return next(err);
+    if (!project) return res.status(404).json({ message: 'Project not found.' });
+
+    db.all(`SELECT * FROM Bills WHERE projectId = ? ORDER BY createdAt DESC, id DESC`, [project.id], (err, bills) => {
+      if (err) return next(err);
+      if (bills.length === 0) return res.json([]);
+
+      const billIds = bills.map(b => b.id);
+      const taskQuery = `SELECT * FROM BillTasks WHERE billId IN (${billIds.map(() => '?').join(',')}) ORDER BY taskName COLLATE NOCASE`;
+      db.all(taskQuery, billIds, (err, rows) => {
+        if (err) return next(err);
+        const tasksByBill = {};
+        rows.forEach(r => {
+          (tasksByBill[r.billId] = tasksByBill[r.billId] || []).push(r);
+        });
+        res.json(bills.map(b => ({ ...b, tasks: tasksByBill[b.id] || [] })));
+      });
+    });
+  });
+});
+
+// DELETE /api/projects/:projectId/bills/:billId - Delete a bill and un-bill its tasks (undo)
+router.delete('/:projectId/bills/:billId', (req, res, next) => {
+  const db = database.getDb();
+  const { billId } = req.params;
+
+  db.all(`SELECT taskId FROM BillTasks WHERE billId = ?`, [billId], (err, rows) => {
+    if (err) return next(err);
+    const taskIds = rows.map(r => r.taskId).filter(id => id != null);
+
+    db.serialize(() => {
+      db.run('BEGIN TRANSACTION;');
+      // Explicit delete — sqlite3 doesn't enable FK cascades by default
+      db.run(`DELETE FROM BillTasks WHERE billId = ?`, [billId], (err) => {
+        if (err) { db.run('ROLLBACK;'); return next(err); }
+        db.run(`DELETE FROM Bills WHERE id = ?`, [billId], function (err) {
+          if (err) { db.run('ROLLBACK;'); return next(err); }
+          if (this.changes === 0) {
+            db.run('ROLLBACK;');
+            return res.status(404).json({ message: 'Bill not found.' });
+          }
+
+          const finish = () => db.run('COMMIT;', (err) => {
+            if (err) return next(err);
+            console.log(`Bill ${billId} deleted; ${taskIds.length} tasks un-billed.`);
+            res.json({ message: 'Bill deleted successfully.', billId, tasksUnbilled: taskIds.length });
+          });
+
+          if (taskIds.length === 0) return finish();
+          db.run(`UPDATE Tasks SET beenBilled = 0 WHERE id IN (${taskIds.map(() => '?').join(',')})`, taskIds, (err) => {
+            if (err) { db.run('ROLLBACK;'); return next(err); }
+            finish();
+          });
+        });
+      });
+    });
+  });
 });
 
 // POST /api/projects/test - Create a test project with billable tasks
