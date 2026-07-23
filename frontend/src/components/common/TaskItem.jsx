@@ -1,10 +1,11 @@
 import React from 'react';
-import { PlayIcon, StopIcon, ClockIcon, CheckIcon } from '@heroicons/react/24/solid';
+import { PlayIcon, StopIcon, ClockIcon, CheckIcon, CurrencyDollarIcon } from '@heroicons/react/24/solid';
 import { useTimer } from '../../contexts/TimerContext';
 import { formatHoursHuman } from '../../utils/timeUtils';
+import { formatNZD } from '../../utils/billingUtils';
 import ProjectIcon from '../ProjectIcon';
 
-function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone }) {
+function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPricing }) {
   const { startTimer, stopTimer, activeTimerDetails, isRunning } = useTimer();
   const isThisTaskActive = isRunning && activeTimerDetails?.taskId === task.id;
 
@@ -50,6 +51,16 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone }) {
                   Local
                 </span>
               )}
+              {task.fixedPrice != null && (
+                <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                  Fixed {formatNZD(task.fixedPrice)}
+                </span>
+              )}
+              {task.fixedPrice == null && task.hourlyRateOverride != null && (
+                <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-medium">
+                  @{formatNZD(task.hourlyRateOverride)}/hr
+                </span>
+              )}
             </div>
             <p className="text-sm text-gray-600">
               {task.projectName ? `Project: ${task.projectName}` : (task.project?.name || 'No Project')}
@@ -58,6 +69,15 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone }) {
           </div>
         </div>
         <div className="flex items-center gap-1 ml-4 flex-shrink-0">
+          {onEditPricing && (
+            <button
+              onClick={() => onEditPricing(task)}
+              className="p-2 rounded-full text-gray-400 hover:text-purple-600 hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-purple-400 focus:ring-offset-2 transition-all duration-200"
+              title="Edit task pricing"
+            >
+              <CurrencyDollarIcon className="h-5 w-5 sm:h-6 sm:w-6" />
+            </button>
+          )}
           {task.isManual && onMarkDone && !isThisTaskActive && (
             <button
               onClick={() => onMarkDone(task.id)}

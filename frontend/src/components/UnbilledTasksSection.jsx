@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { CheckIcon } from '@heroicons/react/24/solid';
 import BillingModal from './BillingModal';
+import { computeBillTotals, taskBillAmount, formatNZD } from '../utils/billingUtils';
 
 function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
   const [selectedTasks, setSelectedTasks] = useState(new Set());
@@ -31,22 +32,7 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
   };
 
   const selectedTasksArray = unbilledTasks.filter(task => selectedTasks.has(task.id));
-  const totalSelectedTime = selectedTasksArray.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
-  const subtotal = totalSelectedTime * (project.hourlyRate || 0);
-  const gst = subtotal * 0.15; // 15% GST
-  const total = subtotal + gst;
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-NZ', {
-      style: 'currency',
-      currency: 'NZD'
-    }).format(amount);
-  };
-
-  // Round time to nearest 0.25 hours (15 minutes)
-  const roundToQuarterHour = (hours) => {
-    return Math.ceil(hours * 4) / 4;
-  };
+  const totals = computeBillTotals(selectedTasksArray, project.hourlyRate);
 
   const handleCreateBill = () => {
     setShowBillingModal(true);
@@ -92,7 +78,19 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
                         )}
                       </div>
                       <div>
-                        <h3 className="font-medium text-gray-800">{task.name}</h3>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-medium text-gray-800">{task.name}</h3>
+                          {task.fixedPrice != null && (
+                            <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                              Fixed {formatNZD(task.fixedPrice)}
+                            </span>
+                          )}
+                          {task.fixedPrice == null && task.hourlyRateOverride != null && (
+                            <span className="text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-medium">
+                              @{formatNZD(task.hourlyRateOverride)}/hr
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-gray-600">Status: {task.status}</p>
                       </div>
                     </div>
@@ -101,7 +99,7 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
                         {formatHoursHuman(task.totalHoursSpent || 0)}
                       </p>
                       <p className="text-sm text-gray-600">
-                        {formatCurrency((task.totalHoursSpent || 0) * (project.hourlyRate || 0))}
+                        {formatNZD(taskBillAmount(task, project.hourlyRate))}
                       </p>
                     </div>
                   </div>
@@ -125,7 +123,9 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
                       <div key={task.id} className="flex justify-between text-sm">
                         <span className="truncate pr-2">{task.name}</span>
                         <span className="whitespace-nowrap">
-                          {formatHoursHuman(task.totalHoursSpent || 0)}
+                          {task.fixedPrice != null
+                            ? formatNZD(task.fixedPrice)
+                            : formatHoursHuman(task.totalHoursSpent || 0)}
                         </span>
                       </div>
                     ))}
@@ -137,24 +137,30 @@ function UnbilledTasksSection({ project, tasks, onTasksBilled, onRefresh }) {
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span>Total Time:</span>
-                      <span className="font-medium">{formatHoursHuman(totalSelectedTime)}</span>
+                      <span className="font-medium">{formatHoursHuman(totals.totalHours)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
-                      <span>Rounded Time:</span>
-                      <span className="font-medium">{formatHoursHuman(roundToQuarterHour(totalSelectedTime))}</span>
+                      <span>Billed Time:</span>
+                      <span className="font-medium">{formatHoursHuman(totals.roundedHours)}</span>
                     </div>
+                    {totals.fixedAmount > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span>Fixed-price items:</span>
+                        <span className="font-medium">{formatNZD(totals.fixedAmount)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-sm">
                       <span>Subtotal:</span>
-                      <span className="font-medium">{formatCurrency(roundToQuarterHour(totalSelectedTime) * (project.hourlyRate || 0))}</span>
+                      <span className="font-medium">{formatNZD(totals.subtotal)}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span>GST (15%):</span>
-                      <span className="font-medium">{formatCurrency(roundToQuarterHour(totalSelectedTime) * (project.hourlyRate || 0) * 0.15)}</span>
+                      <span className="font-medium">{formatNZD(totals.gst)}</span>
                     </div>
                     <hr className="border-gray-300" />
                     <div className="flex justify-between font-semibold">
                       <span>Total:</span>
-                      <span>{formatCurrency(roundToQuarterHour(totalSelectedTime) * (project.hourlyRate || 0) * 1.15)}</span>
+                      <span>{formatNZD(totals.total)}</span>
                     </div>
                   </div>
 

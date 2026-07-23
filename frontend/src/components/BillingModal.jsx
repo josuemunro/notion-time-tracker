@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { XMarkIcon, ClipboardIcon, CheckIcon } from '@heroicons/react/24/solid';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { createBill, deleteBill } from '../services/api';
+import { computeBillTotals, formatNZD } from '../utils/billingUtils';
 import { useToast } from '../contexts/ToastContext';
 
 function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
@@ -11,23 +12,9 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
 
   if (!project || !selectedTasks || selectedTasks.length === 0) return null;
 
-  // Round time to nearest 0.25 hours (15 minutes)
-  const roundToQuarterHour = (hours) => {
-    return Math.ceil(hours * 4) / 4;
-  };
-
-  const totalTime = selectedTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
-  const roundedTime = roundToQuarterHour(totalTime);
-  const subtotal = roundedTime * (project.hourlyRate || 0);
-  const gst = subtotal * 0.15;
-  const total = subtotal + gst;
-
-  const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-NZ', {
-      style: 'currency',
-      currency: 'NZD'
-    }).format(amount);
-  };
+  const { totalHours: totalTime, roundedHours: roundedTime, fixedAmount, subtotal, gst, total } =
+    computeBillTotals(selectedTasks, project.hourlyRate);
+  const formatCurrency = formatNZD;
 
   const copyToClipboard = async (text, type) => {
     try {
@@ -117,11 +104,17 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
                 <div key={task.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                   <div>
                     <p className="font-medium text-gray-800">{task.name}</p>
-                    <p className="text-sm text-gray-600">Status: {task.status}</p>
+                    <p className="text-sm text-gray-600">
+                      Status: {task.status}
+                      {task.fixedPrice != null && <span className="ml-2 text-purple-700 font-medium">Fixed price</span>}
+                      {task.fixedPrice == null && task.hourlyRateOverride != null && (
+                        <span className="ml-2 text-sky-700 font-medium">@{formatNZD(task.hourlyRateOverride)}/hr</span>
+                      )}
+                    </p>
                   </div>
                   <div className="text-right">
                     <p className="font-medium text-gray-800">
-                      {formatHoursHuman(task.totalHoursSpent || 0)}
+                      {task.fixedPrice != null ? formatNZD(task.fixedPrice) : formatHoursHuman(task.totalHoursSpent || 0)}
                     </p>
                     <p className="text-sm text-gray-600">
                       {(task.totalHoursSpent || 0).toFixed(2)}h decimal
@@ -180,6 +173,12 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
           <div className="bg-green-50 p-4 rounded-lg border border-green-200">
             <h3 className="font-semibold text-green-800 mb-3">Financial Summary</h3>
             <div className="space-y-2">
+              {fixedAmount > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-green-700">Fixed-price items:</span>
+                  <span className="font-medium text-green-800">{formatCurrency(fixedAmount)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span className="text-green-700">Subtotal:</span>
                 <span className="font-medium text-green-800">{formatCurrency(subtotal)}</span>

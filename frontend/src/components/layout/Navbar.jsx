@@ -65,6 +65,12 @@ function Navbar() {
             >
               Tasks
             </NavLink>
+            <NavLink
+              to="/calendar"
+              className={({ isActive }) => `${linkClassName} ${isActive ? activeClassName : ''}`}
+            >
+              Calendar
+            </NavLink>
           </div>
           <div className="flex items-center">
             {syncMessage && <span className={`text-xs mr-3 ${syncMessage.includes('failed') ? 'text-red-400' : 'text-green-400'}`}>{syncMessage}</span>}

@@ -75,6 +75,7 @@ export const getTaskDetails = (taskId) => apiClient.get(`/tasks/${taskId}`);
 export const getTasksInProgress = () => apiClient.get('/tasks/in-progress');
 export const createTask = (taskData) => apiClient.post('/tasks', taskData);
 export const updateTaskStatus = (taskId, status) => apiClient.patch(`/tasks/${taskId}/status`, { status });
+export const updateTaskPricing = (taskId, pricing) => apiClient.patch(`/tasks/${taskId}/pricing`, pricing);
 
 // Projects (manual creation)
 export const createProject = (projectData) => apiClient.post('/projects', projectData);

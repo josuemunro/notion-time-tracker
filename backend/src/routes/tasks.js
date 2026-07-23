@@ -198,6 +198,36 @@ router.patch('/:taskId/status', async (req, res, next) => {
   }
 });
 
+// PATCH /api/tasks/:taskId/pricing - Set per-task pricing (local-only, not synced to Notion)
+// Body: { fixedPrice: number|null, hourlyRateOverride: number|null } — null clears; at most one may be set
+router.patch('/:taskId/pricing', async (req, res, next) => {
+  const db = database.getDb();
+  const { taskId } = req.params;
+  const { fixedPrice = null, hourlyRateOverride = null } = req.body;
+
+  const validAmount = (v) => v === null || (typeof v === 'number' && !isNaN(v) && v >= 0);
+  if (!validAmount(fixedPrice) || !validAmount(hourlyRateOverride)) {
+    return res.status(400).json({ message: 'fixedPrice and hourlyRateOverride must be non-negative numbers or null.' });
+  }
+  if (fixedPrice !== null && hourlyRateOverride !== null) {
+    return res.status(400).json({ message: 'A task can have a fixed price or an hourly rate override, not both.' });
+  }
+
+  try {
+    db.run(
+      "UPDATE Tasks SET fixedPrice = ?, hourlyRateOverride = ? WHERE id = ?",
+      [fixedPrice, hourlyRateOverride, taskId],
+      function (err) {
+        if (err) return next(err);
+        if (this.changes === 0) return res.status(404).json({ message: 'Task not found.' });
+        res.json({ message: 'Task pricing updated.', taskId: parseInt(taskId), fixedPrice, hourlyRateOverride });
+      }
+    );
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/tasks/:taskId - Get a specific task with its time entries
 router.get('/:taskId', async (req, res, next) => {
   const db = database.getDb(); // Get db instance inside the handler

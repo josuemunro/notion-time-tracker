@@ -101,10 +101,19 @@ function PreviousBillsSection({ project, refreshToken = 0 }) {
                     <div className="space-y-1">
                       {bill.tasks.map(task => (
                         <div key={task.id} className="flex justify-between text-sm py-1">
-                          <span className="text-gray-700 truncate pr-4">{task.taskName}</span>
+                          <span className="text-gray-700 truncate pr-4">
+                            {task.taskName}
+                            {task.fixedPrice != null && (
+                              <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">
+                                Fixed {formatCurrency(task.fixedPrice)}
+                              </span>
+                            )}
+                          </span>
                           <span className="text-gray-600 whitespace-nowrap tabular-nums">
                             {formatHoursHuman(task.hoursSpent || 0)}
-                            <span className="text-gray-400 ml-2">({(task.hoursSpent || 0).toFixed(2)}h)</span>
+                            <span className="text-gray-400 ml-2">
+                              ({(task.hoursSpent || 0).toFixed(2)}h{task.fixedPrice == null && task.rate != null ? ` @ ${formatCurrency(task.rate)}/hr` : ''})
+                            </span>
                           </span>
                         </div>
                       ))}
@@ -117,8 +126,14 @@ function PreviousBillsSection({ project, refreshToken = 0 }) {
                         <span className="text-gray-600">Rate:</span>
                         <span className="text-gray-800">{formatCurrency(bill.hourlyRate)}/hour</span>
                       </div>
+                      {(bill.fixedAmount || 0) > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Fixed-price items:</span>
+                          <span className="text-gray-800">{formatCurrency(bill.fixedAmount)}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Subtotal ({formatHoursHuman(bill.roundedHours || 0)}):</span>
+                        <span className="text-gray-600">Subtotal ({formatHoursHuman(bill.roundedHours || 0)} billed):</span>
                         <span className="text-gray-800">{formatCurrency(bill.subtotal)}</span>
                       </div>
                       <div className="flex justify-between">

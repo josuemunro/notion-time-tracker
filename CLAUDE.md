@@ -51,11 +51,14 @@ frontend/src/
   services/api.js     — Axios client (baseURL: /api)
   contexts/TimerContext.jsx — Active timer state, favicon, doc title
   contexts/ToastContext.jsx — Toast notifications + undo
-  pages/HomePage.jsx  — Dashboard: Quick Start + Timeline
+  pages/HomePage.jsx  — Dashboard: money timer + Quick Start + Timeline (?date= deep-link)
+  pages/CalendarPage.jsx — Read-only week view (day columns, totals, $ earned)
   components/TimelineView.jsx — Day timeline (drag, resize, create, zoom, live timer entry)
+  components/MoneyTimer.jsx — WebGL shader timer with live earnings (replaced XP/streak DopamineTimer)
   components/PreviousBillsSection.jsx — Bill history with task breakdowns (project page)
-  components/DopamineTimer.jsx — XP/level gamified timer
+  components/TaskPricingModal.jsx — Per-task pricing editor (inherit / custom rate / fixed price)
   utils/timeUtils.js  — Date helpers (Pacific/Auckland timezone)
+  utils/billingUtils.js — Billing + earnings math (mirrors server bill rules)
 
 frontend/nginx.conf   — Production reverse proxy (proxies /api → backend:3001)
 docker-compose.yml    — Container orchestration
@@ -66,10 +69,10 @@ docker-compose.yml    — Container orchestration
 ```
 Clients (id, notionId, name, status)
   → Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color)
-    → Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage)
+    → Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage, fixedPrice, hourlyRateOverride)
       → TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
-    → Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, createdAt)
-      → BillTasks (id, billId, taskId, taskName, hoursSpent)
+    → Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt)
+      → BillTasks (id, billId, taskId, taskName, hoursSpent, fixedPrice, rate)
 ```
 
 - `notionId` = Notion page UUID (UNIQUE, used for sync dedup)
@@ -82,6 +85,8 @@ Clients (id, notionId, name, status)
 
 - **Timezone**: All date logic uses `Pacific/Auckland` (NZ). Timestamps are stored as NZ wall-clock time encoded as UTC ISO strings (`getNZTimestamp()` pattern), so display them with `timeZone: 'UTC'` to avoid double-shifting. Check boundary logic carefully.
 - **Currency**: NZD with 15% GST. Time rounded up to nearest 0.25 hrs for billing.
+- **Per-task pricing** (local-only, survives Notion sync): a task inherits the project `hourlyRate`, or has its own `hourlyRateOverride`, or a `fixedPrice` (flat, regardless of hours). Bill math: fixed tasks add their flat price; override tasks bill their rounded hours at their rate; remaining tasks pool hours rounded once at the project rate. Mirrored in `billingUtils.js` (client) and `projects.js` (server, source of truth).
+- **MoneyTimer earnings**: hourly tasks show session $ ticking up (rate × elapsed); fixed-price tasks show live effective $/hr ticking down (price ÷ total task hours). Shader pauses when tab is hidden; no explicit `loseContext()` on cleanup (breaks React StrictMode remounts).
 - **Assignee filter**: `tasks.js` filters by `'%Josue Munro%'` (hardcoded).
 - **Icon caching**: Notion file URLs expire ~1hr, so icons download to `backend/assets/icons/` on sync.
 - **No auto-sync**: Manual only to avoid Notion rate limits.

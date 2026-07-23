@@ -7,6 +7,7 @@ import ClientDetailPage from './pages/ClientDetailPage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectDetailPage from './pages/ProjectDetailPage';
 import TasksPage from './pages/TasksPage';
+import CalendarPage from './pages/CalendarPage';
 import LoginPage from './pages/LoginPage';
 import { ToastProvider } from './contexts/ToastContext';
 import { checkAuth } from './services/api';
@@ -43,6 +44,7 @@ function App() {
                   <Route path="/projects" element={<ProjectsPage />} />
                   <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
                   <Route path="/tasks" element={<TasksPage />} />
+                  <Route path="/calendar" element={<CalendarPage />} />
                   <Route path="*" element={
                     <div className="text-center py-10">
                       <h1 className="text-3xl font-semibold text-gray-700">404 - Page Not Found</h1>

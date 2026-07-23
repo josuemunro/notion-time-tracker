@@ -133,12 +133,14 @@ router.get('/:projectId', async (req, res, next) => {
           t.status,
           t.isBillable,
           t.beenBilled,
+          t.fixedPrice,
+          t.hourlyRateOverride,
           COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent,
           (SELECT te_active.startTime FROM TimeEntries te_active WHERE te_active.taskId = t.id AND te_active.endTime IS NULL LIMIT 1) AS activeTimerStartTime
         FROM Tasks t
         LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
         WHERE t.projectId = ?
-        GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.beenBilled
+        GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.beenBilled, t.fixedPrice, t.hourlyRateOverride
         ORDER BY t.name COLLATE NOCASE;
       `;
       db.all(tasksQuery, [project.id], (err, tasks) => {
@@ -324,13 +326,14 @@ router.post('/:projectId/bills', (req, res, next) => {
     if (!project) return res.status(404).json({ message: 'Project not found.' });
 
     const placeholders = taskIds.map(() => '?').join(',');
-    // Snapshot each task's name and hours at billing time
+    // Snapshot each task's name, hours, and pricing at billing time
     const tasksQuery = `
-      SELECT t.id, t.name, COALESCE(SUM(te.duration), 0) / 3600.0 AS hoursSpent
+      SELECT t.id, t.name, t.fixedPrice, t.hourlyRateOverride,
+             COALESCE(SUM(te.duration), 0) / 3600.0 AS hoursSpent
       FROM Tasks t
       LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
       WHERE t.id IN (${placeholders}) AND t.projectId = ?
-      GROUP BY t.id, t.name
+      GROUP BY t.id, t.name, t.fixedPrice, t.hourlyRateOverride
     `;
     db.all(tasksQuery, [...taskIds, project.id], (err, tasks) => {
       if (err) return next(err);
@@ -338,11 +341,23 @@ router.post('/:projectId/bills', (req, res, next) => {
         return res.status(400).json({ message: 'Some tasks do not belong to this project.' });
       }
 
-      // Same billing rules as the frontend: round total up to 0.25h, 15% GST
-      const totalHours = tasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
-      const roundedHours = Math.ceil(totalHours * 4) / 4;
+      // Billing rules (mirrored in frontend/src/utils/billingUtils.js):
+      // fixed-price tasks contribute their flat price; hourly-override tasks bill
+      // their own hours (rounded up to 0.25h) at their rate; remaining tasks pool
+      // hours, rounded once, at the project rate. 15% GST on the lot.
+      const roundQ = (h) => Math.ceil(h * 4) / 4;
       const rate = project.hourlyRate || 0;
-      const subtotal = roundedHours * rate;
+      const fixedTasks = tasks.filter(t => t.fixedPrice != null);
+      const overrideTasks = tasks.filter(t => t.fixedPrice == null && t.hourlyRateOverride != null);
+      const pooledTasks = tasks.filter(t => t.fixedPrice == null && t.hourlyRateOverride == null);
+
+      const totalHours = tasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
+      const pooledHours = pooledTasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
+      const fixedAmount = fixedTasks.reduce((sum, t) => sum + t.fixedPrice, 0);
+      const roundedHours = roundQ(pooledHours) + overrideTasks.reduce((sum, t) => sum + roundQ(t.hoursSpent || 0), 0);
+      const subtotal = roundQ(pooledHours) * rate
+        + overrideTasks.reduce((sum, t) => sum + roundQ(t.hoursSpent || 0) * t.hourlyRateOverride, 0)
+        + fixedAmount;
       const gst = subtotal * 0.15;
       const total = subtotal + gst;
       const createdAt = getNZTimestamp();
@@ -350,15 +365,19 @@ router.post('/:projectId/bills', (req, res, next) => {
       db.serialize(() => {
         db.run('BEGIN TRANSACTION;');
         db.run(
-          `INSERT INTO Bills (projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [project.id, totalHours, roundedHours, rate, subtotal, gst, total, createdAt],
+          `INSERT INTO Bills (projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [project.id, totalHours, roundedHours, rate, subtotal, gst, total, fixedAmount, createdAt],
           function (err) {
             if (err) { db.run('ROLLBACK;'); return next(err); }
             const billId = this.lastID;
 
-            const stmt = db.prepare(`INSERT INTO BillTasks (billId, taskId, taskName, hoursSpent) VALUES (?, ?, ?, ?)`);
-            tasks.forEach(t => stmt.run([billId, t.id, t.name, t.hoursSpent]));
+            const stmt = db.prepare(`INSERT INTO BillTasks (billId, taskId, taskName, hoursSpent, fixedPrice, rate) VALUES (?, ?, ?, ?, ?, ?)`);
+            tasks.forEach(t => stmt.run([
+              billId, t.id, t.name, t.hoursSpent,
+              t.fixedPrice != null ? t.fixedPrice : null,
+              t.fixedPrice != null ? null : (t.hourlyRateOverride != null ? t.hourlyRateOverride : rate)
+            ]));
             stmt.finalize((err) => {
               if (err) { db.run('ROLLBACK;'); return next(err); }
 
@@ -370,7 +389,7 @@ router.post('/:projectId/bills', (req, res, next) => {
                   res.status(201).json({
                     message: 'Bill created successfully.',
                     billId, createdAt, totalHours, roundedHours,
-                    hourlyRate: rate, subtotal, gst, total,
+                    hourlyRate: rate, subtotal, gst, total, fixedAmount,
                     tasks
                   });
                 });

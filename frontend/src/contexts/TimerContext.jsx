@@ -101,18 +101,14 @@ export const TimerProvider = ({ children }) => {
     };
   }, []);
 
-  const fetchCurrentActiveTimer = useCallback(async () => {
-    setIsLoading(true);
+  const fetchCurrentActiveTimer = useCallback(async (quiet = false) => {
+    if (!quiet) setIsLoading(true);
     try {
       const { data: timer } = await getActiveTimer();
       if (timer) {
-        setActiveTimerDetails({
-          timeEntryId: timer.timeEntryId,
-          taskId: timer.taskId,
-          taskName: timer.taskName,
-          projectName: timer.projectName,
-          startTime: timer.startTime,
-        });
+        // Keep the full enriched row (rates, pricing, project color/icon,
+        // taskTotalSeconds) — MoneyTimer needs it for live earnings
+        setActiveTimerDetails(timer);
       } else {
         setActiveTimerDetails(null);
         setElapsedTime(0);
@@ -213,7 +209,8 @@ export const TimerProvider = ({ children }) => {
         projectName: projectName,
         startTime: newTimer.startTime,
       });
-      // No need to call fetchCurrentActiveTimer here as we've set it directly
+      // Quiet refetch to pick up the enriched row (rates/pricing for earnings display)
+      fetchCurrentActiveTimer(true);
 
       // Notify listeners (e.g. timeline) — starting a timer may have auto-stopped
       // the previous one on the backend, so views need to refresh

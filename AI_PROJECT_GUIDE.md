@@ -52,7 +52,8 @@ notion-time-tracker/
         │   ├── TimerContext.jsx   # Active timer state, favicon, doc title
         │   └── ToastContext.jsx   # Toast notifications + undo actions
         ├── pages/
-        │   ├── HomePage.jsx       # Dashboard: Quick Start + Timeline
+        │   ├── HomePage.jsx       # Dashboard: money timer + Quick Start + Timeline
+        │   ├── CalendarPage.jsx   # Read-only week view with day/week totals + $
         │   ├── ClientsPage.jsx    # Active clients grid
         │   ├── ClientDetailPage.jsx
         │   ├── ProjectsPage.jsx   # Active projects grid
@@ -60,17 +61,19 @@ notion-time-tracker/
         │   └── TasksPage.jsx      # All tasks list
         ├── components/
         │   ├── layout/Navbar.jsx
-        │   ├── common/TaskItem.jsx     # Play/stop per task
-        │   ├── DopamineTimer.jsx       # XP/level gamified timer
-        │   ├── TimelineView.jsx        # Day timeline (drag, resize, create)
+        │   ├── common/TaskItem.jsx     # Play/stop per task + pricing badge
+        │   ├── MoneyTimer.jsx          # WebGL shader timer with live $ earnings
+        │   ├── TimelineView.jsx        # Day timeline (drag, resize, create, zoom)
         │   ├── ProjectIcon.jsx         # Emoji / image / fallback
         │   ├── TaskSelectionModal.jsx   # Pick task for manual entry
+        │   ├── TaskPricingModal.jsx     # Per-task pricing (inherit/override/fixed)
         │   ├── BillingOverview.jsx      # Billed / unbilled summary
         │   ├── UnbilledTasksSection.jsx # Select + preview billing
         │   ├── BillingModal.jsx         # Final bill with copy/undo
         │   └── PreviousBillsSection.jsx # Bill history with task breakdowns
         └── utils/
-            └── timeUtils.js   # Date helpers (NZ timezone)
+            ├── timeUtils.js     # Date helpers (NZ timezone)
+            └── billingUtils.js  # Billing + earnings math (mirrors server rules)
 ```
 
 ---
@@ -188,6 +191,8 @@ Active timer check: `GET /api/time-entries/active` (returns entry where endTime 
 | GET | `/api/tasks` | All tasks. Query: `?status=`, `?projectId=` |
 | GET | `/api/tasks/in-progress` | Quick Start list (grouped by project) |
 | GET | `/api/tasks/:id` | Task detail + time entries |
+| PATCH | `/api/tasks/:id/status` | Update task status (To Do / Doing / Done) |
+| PATCH | `/api/tasks/:id/pricing` | Set `fixedPrice` or `hourlyRateOverride` (null clears; at most one) |
 
 ### Time Entries
 
@@ -261,7 +266,7 @@ The Notion integration expects these exact property names:
 
 1. **Timezone**: All date logic uses `Pacific/Auckland` (NZ time). See `utils/timeUtils.js`. Timestamps are stored as **NZ wall-clock time encoded as UTC ISO strings** (`getNZTimestamp()` pattern) — format them with `timeZone: 'UTC'` when displaying to avoid double-shifting.
 2. **Currency**: NZD with 15% GST for billing calculations.
-3. **Billing rounding**: Time is rounded up to nearest 0.25 hours.
+3. **Billing rounding + per-task pricing**: Hours round up to 0.25h. Tasks may carry local-only pricing (`fixedPrice` or `hourlyRateOverride`, set via `TaskPricingModal`, never synced to Notion): fixed tasks bill their flat price, override tasks bill their rounded hours at their own rate, everything else pools hours (rounded once) at the project rate. Client math in `utils/billingUtils.js`; server (bills endpoint in `projects.js`) is the source of truth. The MoneyTimer shows hourly earnings ticking up, or a fixed task's live effective $/hr ticking down.
 4. **Icon caching**: Notion file URLs expire after ~1 hour, so project icons are downloaded on sync and served statically (from the `/data` volume in production).
 5. **Auth**: Single password (`APP_PASSWORD`). Login issues stateless HMAC-signed tokens (secret derived from `APP_PASSWORD`, 30-day expiry) verified in `app.js` — no server-side session state, so sessions survive restarts, redeploys, and Railway App Sleeping. Changing `APP_PASSWORD` invalidates all tokens. No password set = auth disabled (local dev).
 6. **No auto-sync**: Sync is manual to avoid Notion rate limits.

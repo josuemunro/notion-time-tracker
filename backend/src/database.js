@@ -95,6 +95,10 @@ function init() {
           db.run(`ALTER TABLE Tasks ADD COLUMN deadline TEXT`, () => { });
           db.run(`ALTER TABLE Tasks ADD COLUMN taskOrPage TEXT`, () => { });
           db.run(`ALTER TABLE Tasks ADD COLUMN isManual BOOLEAN DEFAULT false`, () => { });
+          // Local-only pricing (not synced from Notion): a task either inherits the
+          // project hourlyRate, has its own hourly rate, or is fixed-price
+          db.run(`ALTER TABLE Tasks ADD COLUMN fixedPrice REAL`, () => { });
+          db.run(`ALTER TABLE Tasks ADD COLUMN hourlyRateOverride REAL`, () => { });
         });
 
         // TimeEntries Table
@@ -128,12 +132,14 @@ function init() {
             subtotal REAL DEFAULT 0,
             gst REAL DEFAULT 0,
             total REAL DEFAULT 0,
+            fixedAmount REAL DEFAULT 0,
             createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (projectId) REFERENCES Projects(id) ON DELETE CASCADE
           )
         `, (err) => {
           if (err) return reject(err);
           console.log('Bills table created or already exists.');
+          db.run(`ALTER TABLE Bills ADD COLUMN fixedAmount REAL DEFAULT 0`, () => { });
         });
 
         // BillTasks Table — per-task snapshot within a bill (name/hours frozen at billing time)
@@ -144,12 +150,16 @@ function init() {
             taskId INTEGER,
             taskName TEXT,
             hoursSpent REAL DEFAULT 0,
+            fixedPrice REAL,
+            rate REAL,
             FOREIGN KEY (billId) REFERENCES Bills(id) ON DELETE CASCADE,
             FOREIGN KEY (taskId) REFERENCES Tasks(id) ON DELETE SET NULL
           )
         `, (err) => {
           if (err) return reject(err);
           console.log('BillTasks table created or already exists.');
+          db.run(`ALTER TABLE BillTasks ADD COLUMN fixedPrice REAL`, () => { });
+          db.run(`ALTER TABLE BillTasks ADD COLUMN rate REAL`, () => { });
         });
 
         // Triggers to update `updatedAt` timestamps (Optional but good practice)

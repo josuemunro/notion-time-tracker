@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTimer } from '../contexts/TimerContext';
 import { useToast } from '../contexts/ToastContext';
 import { getTasksInProgress, getTimeEntries, updateTaskStatus } from '../services/api';
 import TaskItem from '../components/common/TaskItem';
 import TimelineView from '../components/TimelineView';
-import DopamineTimer from '../components/DopamineTimer';
+import MoneyTimer from '../components/MoneyTimer';
 import ProjectIcon from '../components/ProjectIcon';
 import AddTaskModal from '../components/AddTaskModal';
 import { PlayIcon, StopIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, ListBulletIcon, PlusIcon } from '@heroicons/react/24/solid';
@@ -30,8 +31,17 @@ function HomePage() {
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
 
-  // State for selected date with navigation support
-  const [selectedDate, setSelectedDate] = useState(() => getNZDateString());
+  // State for selected date with navigation support (?date=YYYY-MM-DD deep-links
+  // from the calendar view land on that day's timeline)
+  const [searchParams] = useSearchParams();
+  const dateParam = searchParams.get('date');
+  const [selectedDate, setSelectedDate] = useState(() =>
+    /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') ? dateParam : getNZDateString()
+  );
+
+  useEffect(() => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam || '')) setSelectedDate(dateParam);
+  }, [dateParam]);
 
   // Memoize today's date for comparison using NZ timezone
   const todayDate = useMemo(() => getNZDateString(), []);
@@ -150,8 +160,8 @@ function HomePage() {
 
   return (
     <div className="space-y-12">
-      {/* Enhanced Dopamine Timer */}
-      <DopamineTimer />
+      {/* Money-first shader timer */}
+      <MoneyTimer />
 
       {/* Stop Button for Active Timer */}
       {isRunning && (

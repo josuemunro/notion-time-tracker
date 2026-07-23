@@ -6,6 +6,7 @@ import ProjectIcon from '../components/ProjectIcon';
 import BillingOverview from '../components/BillingOverview';
 import UnbilledTasksSection from '../components/UnbilledTasksSection';
 import PreviousBillsSection from '../components/PreviousBillsSection';
+import TaskPricingModal from '../components/TaskPricingModal';
 import { ArrowPathIcon, ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/solid';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { useTimer } from '../contexts/TimerContext'; // Import useTimer
@@ -25,6 +26,7 @@ function ProjectDetailPage() {
   const [hexInput, setHexInput] = useState('');
   const [rateInput, setRateInput] = useState(''); // Add separate state for rate input
   const [billsRefreshToken, setBillsRefreshToken] = useState(0); // Bump to refetch Previous Bills
+  const [pricingTask, setPricingTask] = useState(null); // Task being edited in TaskPricingModal
   const { startTimer, activeTimerDetails, isRunning } = useTimer(); // Get timer functions
   const prevIsRunningRef = useRef(isRunning); // Track previous isRunning state
   const isFetchingRef = useRef(false); // Track if already fetching to prevent concurrent calls
@@ -331,6 +333,7 @@ function ProjectDetailPage() {
                   ...task,
                   projectName: project.name // Pass project name to TaskItem
                 }}
+                onEditPricing={setPricingTask}
               // onStartOverride and onStopOverride are handled by useTimer context via TaskItem itself
               />
             ))}
@@ -339,6 +342,19 @@ function ProjectDetailPage() {
           <p className="text-gray-500">No tasks found for this project.</p>
         )}
       </div>
+
+      {/* Task Pricing Modal */}
+      {pricingTask && (
+        <TaskPricingModal
+          task={pricingTask}
+          project={project}
+          onClose={() => setPricingTask(null)}
+          onSaved={() => {
+            setPricingTask(null);
+            fetchProject(true);
+          }}
+        />
+      )}
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
