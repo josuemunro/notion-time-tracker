@@ -8,6 +8,7 @@ import TimelineView from '../components/TimelineView';
 import MoneyTimer from '../components/MoneyTimer';
 import ProjectIcon from '../components/ProjectIcon';
 import AddTaskModal from '../components/AddTaskModal';
+import TaskPricingModal from '../components/TaskPricingModal';
 import EmptyState from '../components/common/EmptyState';
 import { PlayIcon, StopIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, ListBulletIcon, PlusIcon } from '@heroicons/react/24/solid';
 import { getNZDateString, formatNZTime, formatDurationHuman } from '../utils/timeUtils';
@@ -31,6 +32,7 @@ function HomePage() {
   const [dayEntries, setDayEntries] = useState([]);
   const [isLoadingEntries, setIsLoadingEntries] = useState(false);
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
+  const [pricingTask, setPricingTask] = useState(null); // Task being edited in TaskPricingModal
 
   // State for selected date with navigation support (?date=YYYY-MM-DD deep-links
   // from the calendar view land on that day's timeline)
@@ -324,9 +326,13 @@ function HomePage() {
                               status: task.status || task.taskStatus,
                               totalHoursSpent: task.totalHoursSpent,
                               isManual: task.isManual,
+                              fixedPrice: task.fixedPrice,
+                              hourlyRateOverride: task.hourlyRateOverride,
+                              projectHourlyRate: projectGroup.projectHourlyRate,
                             }}
                             onStartOverride={handleQuickStart}
                             onMarkDone={handleMarkDone}
+                            onEditPricing={setPricingTask}
                           />
                         ))}
                       </div>
@@ -404,6 +410,19 @@ function HomePage() {
         onClose={() => setShowAddTaskModal(false)}
         onTaskCreated={handleTaskCreated}
       />
+
+      {/* Task Pricing Modal */}
+      {pricingTask && (
+        <TaskPricingModal
+          task={pricingTask}
+          project={{ hourlyRate: pricingTask.projectHourlyRate }}
+          onClose={() => setPricingTask(null)}
+          onSaved={() => {
+            setPricingTask(null);
+            fetchInProgress();
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -77,12 +77,15 @@ router.get('/in-progress', async (req, res, next) => {
         p.iconType AS projectIconType,
         p.iconValue AS projectIconValue,
         p.color AS projectColor,
+        p.hourlyRate AS projectHourlyRate,
         t.id AS taskId,
         t.notionId AS taskNotionId,
         t.name AS taskName,
         t.status AS taskStatus,
         t.assignee AS taskAssignee,
         t.isManual AS taskIsManual,
+        t.fixedPrice AS taskFixedPrice,
+        t.hourlyRateOverride AS taskHourlyRateOverride,
         (SELECT te_active.startTime FROM TimeEntries te_active WHERE te_active.taskId = t.id AND te_active.endTime IS NULL LIMIT 1) AS activeTimerStartTime,
         COALESCE(SUM(CASE WHEN te_done.endTime IS NOT NULL THEN te_done.duration ELSE 0 END), 0) / 3600.0 AS totalHoursSpent
       FROM Tasks t
@@ -99,7 +102,7 @@ router.get('/in-progress', async (req, res, next) => {
     db.all(query, [], (err, rows) => {
       if (err) return next(err);
       const groupedByProject = rows.reduce((acc, row) => {
-        const { projectId, projectName, projectNotionId, projectIconType, projectIconValue, projectColor, ...taskData } = row;
+        const { projectId, projectName, projectNotionId, projectIconType, projectIconValue, projectColor, projectHourlyRate, ...taskData } = row;
         if (!acc[projectId]) {
           acc[projectId] = {
             projectId,
@@ -108,6 +111,7 @@ router.get('/in-progress', async (req, res, next) => {
             projectIconType,
             projectIconValue,
             projectColor,
+            projectHourlyRate,
             tasks: [],
           };
         }
@@ -119,6 +123,8 @@ router.get('/in-progress', async (req, res, next) => {
             status: taskData.taskStatus,
             assignee: taskData.taskAssignee,
             isManual: !!taskData.taskIsManual,
+            fixedPrice: taskData.taskFixedPrice,
+            hourlyRateOverride: taskData.taskHourlyRateOverride,
             activeTimerStartTime: taskData.activeTimerStartTime,
             totalHoursSpent: row.totalHoursSpent
           });
