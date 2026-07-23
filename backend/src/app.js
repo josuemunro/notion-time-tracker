@@ -11,8 +11,34 @@ const apiRoutes = require('./routes/index'); // Import the main API router
 const app = express();
 const PORT = process.env.PORT || process.env.BACKEND_PORT || 3001;
 
-// Auth token store (in-memory, survives until process restart)
-const validTokens = new Set();
+// Stateless signed auth tokens — survive process restarts (Railway App Sleeping,
+// redeploys). Changing APP_PASSWORD invalidates all existing tokens.
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function tokenSecret() {
+  return crypto.createHash('sha256')
+    .update('ntt-auth:' + (process.env.APP_PASSWORD || 'dev'))
+    .digest();
+}
+
+function createToken() {
+  const expiry = Date.now() + TOKEN_TTL_MS;
+  const sig = crypto.createHmac('sha256', tokenSecret()).update(String(expiry)).digest('hex');
+  return `${expiry}.${sig}`;
+}
+
+function isValidToken(token) {
+  if (!token) return false;
+  const [expiryStr, sig] = token.split('.');
+  const expiry = Number(expiryStr);
+  if (!expiry || !sig || Date.now() > expiry) return false;
+  const expected = crypto.createHmac('sha256', tokenSecret()).update(expiryStr).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sig, 'hex'), Buffer.from(expected, 'hex'));
+  } catch {
+    return false;
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -27,14 +53,10 @@ app.post('/api/auth/login', (req, res) => {
   const appPassword = process.env.APP_PASSWORD;
   if (!appPassword) {
     // No password configured = auth disabled (local dev)
-    const token = crypto.randomBytes(32).toString('hex');
-    validTokens.add(token);
-    return res.json({ token });
+    return res.json({ token: createToken() });
   }
   if (password === appPassword) {
-    const token = crypto.randomBytes(32).toString('hex');
-    validTokens.add(token);
-    return res.json({ token });
+    return res.json({ token: createToken() });
   }
   return res.status(401).json({ message: 'Invalid password' });
 });
@@ -43,7 +65,7 @@ app.get('/api/auth/check', (req, res) => {
   const appPassword = process.env.APP_PASSWORD;
   if (!appPassword) return res.json({ authenticated: true });
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (token && validTokens.has(token)) return res.json({ authenticated: true });
+  if (isValidToken(token)) return res.json({ authenticated: true });
   return res.status(401).json({ authenticated: false });
 });
 
@@ -52,7 +74,7 @@ app.use('/api', (req, res, next) => {
   const appPassword = process.env.APP_PASSWORD;
   if (!appPassword) return next();
   const token = req.headers.authorization?.replace('Bearer ', '');
-  if (token && validTokens.has(token)) return next();
+  if (isValidToken(token)) return next();
   return res.status(401).json({ message: 'Unauthorized' });
 });
 
