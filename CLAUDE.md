@@ -20,6 +20,7 @@ The local `data/notion_time_tracker.sqlite` is a stale dev snapshot — producti
 
 - **Windows environment** — use PowerShell, not Bash (Bash produces no output in this setup)
 - **Glob/search timeouts** — the `node_modules` folder causes ripgrep timeouts; use PowerShell `Get-ChildItem` for file listing when glob fails
+- **Zombie dev servers** — "stopped" background dev servers can leave orphaned `node` processes holding :3000/:3001. Vite then silently auto-bumps to :3001, the backend can't bind, and `/api` requests proxy into an infinite loop → the app loads a blank page with no console errors. If localhost looks dead or blank, check first: `Get-Process node | % { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine }` and kill any stray vite/nodemon/`src/app.js` processes before restarting (backend first, then frontend).
 
 ## Architecture
 
