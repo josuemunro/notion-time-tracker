@@ -8,19 +8,25 @@ docker compose up --build        # Build + start both services
 docker compose up --build -d     # Detached mode
 
 # Local dev (faster iteration)
-# Root .env holds the Docker DATABASE_PATH (/data/...) which doesn't exist on Windows —
+# Root .env holds the Docker DATABASE_PATH (/data/...) which doesn't exist locally —
 # override it before starting the backend or it crashes with SQLITE_CANTOPEN:
 cd backend; $env:DATABASE_PATH = "$(git rev-parse --show-toplevel)\data\notion_time_tracker.sqlite"; npm run dev   # Terminal 1 — nodemon on :3001
 cd frontend; npm run dev         # Terminal 2 — Vite on :3000, proxies /api → :3001
+```
+
+```zsh
+# macOS equivalent
+cd backend && DATABASE_PATH="$(git rev-parse --show-toplevel)/data/notion_time_tracker.sqlite" npm run dev
+cd frontend && npm run dev
 ```
 
 The local `data/notion_time_tracker.sqlite` is a stale dev snapshot — production data lives on the Railway volume.
 
 ## Platform Notes
 
-- **Windows environment** — use PowerShell, not Bash (Bash produces no output in this setup)
-- **Glob/search timeouts** — the `node_modules` folder causes ripgrep timeouts; use PowerShell `Get-ChildItem` for file listing when glob fails
-- **Zombie dev servers** — "stopped" background dev servers can leave orphaned `node` processes holding :3000/:3001. Vite then silently auto-bumps to :3001, the backend can't bind, and `/api` requests proxy into an infinite loop → the app loads a blank page with no console errors. If localhost looks dead or blank, check first: `Get-Process node | % { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine }` and kill any stray vite/nodemon/`src/app.js` processes before restarting (backend first, then frontend).
+- **Two dev machines** — the project is worked on from both a Windows PC (PowerShell, not Bash: Bash produces no output in that setup) and a Mac (zsh, since Sept 2026). Check `uname`/the OS before choosing commands.
+- **Glob/search timeouts** (Windows) — the `node_modules` folder causes ripgrep timeouts; use PowerShell `Get-ChildItem` for file listing when glob fails
+- **Zombie dev servers** — "stopped" background dev servers can leave orphaned `node` processes holding :3000/:3001. Vite then silently auto-bumps to :3001, the backend can't bind, and `/api` requests proxy into an infinite loop → the app loads a blank page with no console errors. If localhost looks dead or blank, check first and kill any stray vite/nodemon/`src/app.js` processes before restarting (backend first, then frontend). Windows: `Get-Process node | % { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine }`. Mac: `lsof -ti :3000 -ti :3001 | xargs kill`.
 
 ## Architecture
 

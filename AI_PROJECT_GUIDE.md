@@ -107,6 +107,12 @@ Both approaches work. Docker is closer to production; local dev gives hot reload
 $env:DATABASE_PATH = "<repo>\data\notion_time_tracker.sqlite"; npm run dev
 ```
 
+Same thing on macOS/Linux (zsh/bash):
+
+```bash
+DATABASE_PATH="$(git rev-parse --show-toplevel)/data/notion_time_tracker.sqlite" npm run dev
+```
+
 ---
 
 ## Data Flow
@@ -151,11 +157,13 @@ GET /api/tasks/in-progress
 ### Timer flow
 
 ```
-POST /api/time-entries/start   { taskId }   → creates TimeEntry with startTime, no endTime
-POST /api/time-entries/:id/stop             → sets endTime + duration
+POST /api/time-entries/start        { taskId }   → stops any running timer, creates TimeEntry with startTime, no endTime
+POST /api/time-entries/:id/stop                  → sets endTime + duration (split into one row per local day if it crossed midnight)
+POST /api/time-entries/:id/rollover              → running timer crossed local midnight: close at midnight, start a new entry from midnight
 ```
 
 Active timer check: `GET /api/time-entries/active` (returns entry where endTime IS NULL).
+The client (`TimerContext`) calls `rollover` from its 1-second tick when the local date no longer matches the start date; the server re-checks and returns `{ rolled: false }` if nothing to do.
 
 ---
 
@@ -200,11 +208,12 @@ Active timer check: `GET /api/time-entries/active` (returns entry where endTime 
 |--------|------|-------------|
 | GET | `/api/time-entries/active` | Currently running timer (if any) |
 | POST | `/api/time-entries/start` | Start timer. Body: `{ taskId }` |
-| POST | `/api/time-entries/:id/stop` | Stop timer |
-| POST | `/api/time-entries` | Manual entry. Body: `{ taskId, startTime, endTime }` |
-| PUT | `/api/time-entries/:id` | Update entry times |
+| POST | `/api/time-entries/:id/stop` | Stop timer. Splits at local midnight; response has `entries[]`, `split` |
+| POST | `/api/time-entries/:id/rollover` | Running timer crossed midnight → close at midnight + new entry. `{ rolled, timeEntryId, startTime }` |
+| POST | `/api/time-entries` | Manual entry. Body: `{ taskId, startTime, endTime }` (UTC ISO). Splits at midnight |
+| PUT | `/api/time-entries/:id` | Update entry times. Splits at midnight (extra rows inserted) |
 | DELETE | `/api/time-entries/:id` | Delete entry |
-| GET | `/api/time-entries` | List. Query: `?date=`, `?startDate=`, `?endDate=` (YYYY-MM-DD) |
+| GET | `/api/time-entries` | List. Query: `?date=`, `?startDate=`, `?endDate=` (YYYY-MM-DD, local days in the configured timezone). Rows include `localDate` |
 
 ### Sync
 
@@ -212,6 +221,21 @@ Active timer check: `GET /api/time-entries/active` (returns entry where endTime 
 |--------|------|-------------|
 | POST | `/api/sync/notion` | Full sync from Notion |
 | POST | `/api/sync/notion/webhook` | Handle Notion webhook |
+
+### Settings
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/settings` | `{ timeZone }` — the display/day-boundary timezone |
+| PUT | `/api/settings` | Body: `{ timeZone }` (IANA name, validated) |
+
+### Backup
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/backup` | Download a consistent copy of the live SQLite DB (`VACUUM INTO`) |
+| GET | `/api/backup/snapshots` | List on-volume snapshots (`<db dir>/backups/`, e.g. pre-migration) |
+| GET | `/api/backup/snapshots/:name` | Download one snapshot |
 
 ---
 
