@@ -1,19 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { getProjectBills } from '../services/api';
-import { formatHoursHuman } from '../utils/timeUtils';
+import { formatHoursHuman, formatDateTime } from '../utils/timeUtils';
 import { ChevronDownIcon, ChevronRightIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
 import EmptyState from './common/EmptyState';
 
-// Bill timestamps follow the app convention: NZ wall-clock time stored as a UTC ISO
-// string, so format in UTC to display the original NZ time unshifted
-const formatBillDate = (isoString) => {
-  if (!isoString) return 'Unknown date';
-  return new Intl.DateTimeFormat('en-NZ', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'UTC',
-  }).format(new Date(isoString));
-};
+// Bill timestamps are real UTC instants; show them in the configured display timezone
+const formatBillDate = (isoString) => (isoString ? formatDateTime(isoString) : 'Unknown date');
 
 const formatCurrency = (amount) => {
   return new Intl.NumberFormat('en-NZ', {

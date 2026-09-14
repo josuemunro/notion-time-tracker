@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { syncNotion } from '../../services/api'; // Import syncNotion
 import { useTimer } from '../../contexts/TimerContext'; // To refresh timer if needed
-import { ArrowPathIcon } from '@heroicons/react/24/solid';
+import { ArrowPathIcon, Cog6ToothIcon } from '@heroicons/react/24/solid';
 
 
 function Navbar() {
@@ -70,6 +70,14 @@ function Navbar() {
               className={({ isActive }) => `${linkClassName} ${isActive ? activeClassName : ''}`}
             >
               Calendar
+            </NavLink>
+            <NavLink
+              to="/settings"
+              title="Settings"
+              className={({ isActive }) => `${linkClassName} inline-flex items-center gap-1 ${isActive ? activeClassName : ''}`}
+            >
+              <Cog6ToothIcon className="h-4 w-4" />
+              Settings
             </NavLink>
           </div>
           <div className="flex items-center">

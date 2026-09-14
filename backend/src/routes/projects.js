@@ -2,17 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const database = require('../database'); // Import the database module
-
-// NZ wall-clock time encoded as a UTC ISO string (app-wide timestamp convention)
-function getNZTimestamp() {
-  const now = new Date();
-  const nzStr = now.toLocaleString('en-US', { timeZone: 'Pacific/Auckland' });
-  const nzDate = new Date(nzStr);
-  return new Date(Date.UTC(
-    nzDate.getFullYear(), nzDate.getMonth(), nzDate.getDate(),
-    nzDate.getHours(), nzDate.getMinutes(), nzDate.getSeconds()
-  )).toISOString();
-}
+const { nowIso } = require('../utils/time'); // Timestamps are real UTC ISO strings
 
 // GET /api/projects - Get all projects with aggregated time and client info
 router.get('/', async (req, res, next) => {
@@ -360,7 +350,7 @@ router.post('/:projectId/bills', (req, res, next) => {
         + fixedAmount;
       const gst = subtotal * 0.15;
       const total = subtotal + gst;
-      const createdAt = getNZTimestamp();
+      const createdAt = nowIso();
 
       db.serialize(() => {
         db.run('BEGIN TRANSACTION;');

@@ -1,4 +1,9 @@
 // TimelineView version log
+// v1.5 — Timezone-aware: timestamps are real UTC, positions/labels use the configured display
+//        zone (hoursIntoDay/localTimeToIso); entries that cross local midnight are split by the
+//        server, so refetch when a create/update response says `split`; new `refreshToken` and
+//        `onEntriesChanged` props keep the home page's entries list and the timeline in sync;
+//        the now-line re-evaluates "is today" on every tick so it disappears after midnight
 // v1.4 — Styling only: outer container aligned to the app card language
 //        (rounded-xl + border-gray-200 + shadow-sm); no behavior changes
 // v1.3 — Zoomable timeline: Ctrl/Cmd+scroll (cursor-anchored) or header buttons, 20–240px/hr;
@@ -12,7 +17,7 @@
 
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { getTimeEntries, updateTimeEntry, deleteTimeEntry, addManualTimeEntry } from '../services/api';
-import { formatHoursHuman, formatDurationHuman, formatNZTime, formatNZTimeRange, getNZDateString, getNZHoursDecimal, formatTimerDisplay } from '../utils/timeUtils';
+import { formatHoursHuman, formatDurationHuman, formatTime, formatTimeRange, getLocalDateString, getLocalHoursDecimal, hoursIntoDay, localTimeToIso, formatDateString, formatTimerDisplay } from '../utils/timeUtils';
 import ProjectIcon from './ProjectIcon';
 import TaskSelectionModal from './TaskSelectionModal';
 import { useTimer } from '../contexts/TimerContext';
@@ -34,7 +39,9 @@ function getOptimalTextColor(backgroundColor) {
   return luminance > 0.5 ? 'text-black' : 'text-white';
 }
 
-const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] }) => {
+// refreshToken: bump to force a refetch (e.g. after the home page deletes an entry)
+// onEntriesChanged: called after this component creates/updates/deletes an entry
+const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, onEntriesChanged }) => {
 
   const [timeEntries, setTimeEntries] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -101,11 +108,10 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
   // Update current time indicator every 30 seconds
   useEffect(() => {
-    const isToday = selectedDate === getNZDateString();
     const updateCurrentTime = () => {
-      if (!isToday) { setCurrentTimePixels(null); return; }
-      const nzHours = getNZHoursDecimal();
-      setCurrentTimePixels((nzHours - START_HOUR) * HOUR_WIDTH);
+      // Re-evaluated every tick so the line vanishes once midnight passes
+      if (selectedDate !== getLocalDateString()) { setCurrentTimePixels(null); return; }
+      setCurrentTimePixels((getLocalHoursDecimal() - START_HOUR) * HOUR_WIDTH);
     };
     updateCurrentTime();
     const interval = setInterval(updateCurrentTime, 30000);
@@ -131,7 +137,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
   useEffect(() => {
     fetchTimeEntries();
-  }, [selectedDate]);
+  }, [selectedDate, refreshToken]);
 
   // Register callback to refresh timeline when a timer starts or stops
   useEffect(() => {
@@ -178,6 +184,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
       // Delete from backend
       await deleteTimeEntry(entry.timeEntryId);
+      onEntriesChanged?.();
 
       // Set undo timeout
       const timeout = setTimeout(() => {
@@ -213,10 +220,11 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
         duration: deletedEntry.duration
       };
 
-      const { data } = await addManualTimeEntry(newEntry);
+      await addManualTimeEntry(newEntry);
 
       // Add back to UI
       fetchTimeEntries(); // Refresh to get the new entry with proper ID
+      onEntriesChanged?.();
       setDeletedEntry(null);
     } catch (error) {
       console.error('Failed to undo delete:', error);
@@ -256,12 +264,11 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
   // Convert time to pixels from left of timeline
   const timeToPixels = (timeString) => {
-    const date = new Date(timeString);
-    // Use UTC methods to stay consistent with pixelsToTime which creates UTC dates
-    const hours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
-    const pixels = (hours - START_HOUR) * HOUR_WIDTH;
-
-    return pixels;
+    // Hours from local midnight of the selected day in the display timezone.
+    // Midnight at the end of the day reads as 24 so an entry ending at midnight
+    // reaches the right edge instead of wrapping to 0.
+    const hours = hoursIntoDay(timeString, selectedDate);
+    return (hours - START_HOUR) * HOUR_WIDTH;
   };
 
   // Convert pixels to time
@@ -271,15 +278,9 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
     const finalHours = Math.floor(totalMinutes / 60);
     const finalMinutes = totalMinutes % 60;
 
-    // Format time string
-    const timeStr = `${finalHours.toString().padStart(2, '0')}:${finalMinutes.toString().padStart(2, '0')}:00`;
-    const dateStr = selectedDate; // Assuming selectedDate is YYYY-MM-DD format
-
-    // Create date directly in UTC to avoid timezone shifts
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const utcDate = new Date(Date.UTC(year, month - 1, day, finalHours, finalMinutes, 0));
-
-    return utcDate.toISOString();
+    // Wall-clock hh:mm on the selected day in the display timezone → UTC instant
+    // (hour 24 = midnight at the end of the day)
+    return localTimeToIso(selectedDate, finalHours, finalMinutes);
   };
 
   // Effective right edge of an entry in pixels — running entries grow to "now"
@@ -478,8 +479,12 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
       const response = await addManualTimeEntry(newEntry);
       console.log('✅ Create response:', response);
 
+      if (response.data?.split) {
+        console.log('🌙 Entry crossed midnight and was split into', response.data.entries?.length, 'entries');
+      }
       console.log('🔄 Refreshing timeline...');
       await fetchTimeEntries(); // Refresh to show the new entry
+      onEntriesChanged?.();
       console.log('✅ Timeline refreshed');
 
       setShowTaskModal(false);
@@ -599,9 +604,9 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
       // Update tooltip position and time
       if (timelineRect) {
-        const displayTime = handle === 'start' ? formatNZTime(newStartTime) :
-          handle === 'end' ? formatNZTime(newEndTime) :
-            formatNZTimeRange(newStartTime, newEndTime);
+        const displayTime = handle === 'start' ? formatTime(newStartTime) :
+          handle === 'end' ? formatTime(newEndTime) :
+            formatTimeRange(newStartTime, newEndTime);
 
         setDragTooltip({
           x: moveEvent.clientX,
@@ -737,11 +742,13 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
           const response = await updateTimeEntry(entryId, finalEntry);
           console.log('✅ Update response:', response);
 
-          // Refresh from server to ensure consistency for move operations
-          if (handle === 'move') {
-            console.log('🔄 Refreshing timeline after move operation...');
+          // Refresh from server for moves, and whenever the server split the
+          // entry at midnight (the local row no longer matches what's stored)
+          if (handle === 'move' || response.data?.split) {
+            console.log('🔄 Refreshing timeline after update...');
             await fetchTimeEntries();
           }
+          onEntriesChanged?.();
           console.log('✅ Drag update completed');
         } catch (error) {
           console.error('❌ Failed to update time entry:', error);
@@ -960,7 +967,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
 
             const newStartTime = pixelsToTime(newStartPixels);
             const newEndTime = pixelsToTime(newEndPixels);
-            const displayTime = formatNZTimeRange(newStartTime, newEndTime);
+            const displayTime = formatTimeRange(newStartTime, newEndTime);
 
             setDragTooltip({
               x: moveEvent.clientX,
@@ -1020,11 +1027,18 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
               const response = await updateTimeEntry(entry.timeEntryId, finalEntry);
               console.log('✅ Move update response:', response);
 
-              // Update the local state with the new entry data instead of full refresh
-              console.log('🔄 Updating local state after move operation...');
-              setTimeEntries(prev => prev.map(te =>
-                te.timeEntryId === entry.timeEntryId ? { ...te, ...finalEntry } : te
-              ));
+              if (response.data?.split) {
+                // Server split the entry at midnight — local row no longer matches
+                console.log('🌙 Move crossed midnight, refetching split entries...');
+                await fetchTimeEntries();
+              } else {
+                // Update the local state with the new entry data instead of full refresh
+                console.log('🔄 Updating local state after move operation...');
+                setTimeEntries(prev => prev.map(te =>
+                  te.timeEntryId === entry.timeEntryId ? { ...te, ...finalEntry } : te
+                ));
+              }
+              onEntriesChanged?.();
               console.log('✅ Move operation completed');
             } catch (error) {
               console.error('❌ Failed to update time entry:', error);
@@ -1283,7 +1297,7 @@ const TimelineView = ({ selectedDate = new Date().toISOString().split('T')[0] })
         <div className="flex justify-between items-center">
           <div>
             <h3 className="text-lg font-semibold text-gray-800">
-              Timeline for {new Date(selectedDate).toLocaleDateString()}
+              Timeline for {formatDateString(selectedDate)}
             </h3>
             <p className="text-sm text-gray-600 mt-1">
               Drag blue handles to resize • Drag entries to move • Click empty areas to create • Click entries to delete

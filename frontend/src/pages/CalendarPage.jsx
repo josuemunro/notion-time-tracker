@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getTimeEntries } from '../services/api';
-import { formatDurationCompact, formatNZTimeRange, getNZDateString, getNZHoursDecimal } from '../utils/timeUtils';
+import { formatDurationCompact, formatTimeRange, getLocalDateString, getLocalHoursDecimal, hoursIntoDay } from '../utils/timeUtils';
 import { entryEarnings, formatNZD } from '../utils/billingUtils';
 import ProjectIcon from '../components/ProjectIcon';
 import { ChevronLeftIcon, ChevronRightIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
@@ -14,7 +14,7 @@ const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 // The Monday-Sunday week (as YYYY-MM-DD strings) containing today + offset weeks
 const getWeekDates = (weekOffset) => {
-  const [y, m, d] = getNZDateString().split('-').map(Number);
+  const [y, m, d] = getLocalDateString().split('-').map(Number);
   const anchor = new Date(Date.UTC(y, m - 1, d + weekOffset * 7));
   const monday = new Date(anchor);
   monday.setUTCDate(anchor.getUTCDate() - ((anchor.getUTCDay() + 6) % 7));
@@ -25,12 +25,6 @@ const getWeekDates = (weekOffset) => {
   });
 };
 
-// Stored timestamps are NZ wall-clock labeled UTC — read with getUTC*
-const isoToHours = (iso) => {
-  const date = new Date(iso);
-  return date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
-};
-
 function CalendarPage() {
   const navigate = useNavigate();
   const [weekOffset, setWeekOffset] = useState(0);
@@ -38,7 +32,7 @@ function CalendarPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset]);
-  const todayStr = getNZDateString();
+  const todayStr = getLocalDateString();
 
   useEffect(() => {
     let cancelled = false;
@@ -58,10 +52,11 @@ function CalendarPage() {
     return () => { cancelled = true; };
   }, [weekDates]);
 
+  // Group by local calendar day (server supplies localDate in the display timezone)
   const entriesByDate = useMemo(() => {
     const map = {};
     entries.forEach(e => {
-      const date = (e.startTime || '').slice(0, 10);
+      const date = e.localDate || getLocalDateString(new Date(e.startTime));
       (map[date] = map[date] || []).push(e);
     });
     return map;
@@ -70,12 +65,14 @@ function CalendarPage() {
   // Visible hour window: at least 7am-7pm, expanded to fit entries
   const [startHour, endHour] = useMemo(() => {
     let min = 7, max = 19;
-    entries.forEach(e => {
-      min = Math.min(min, Math.floor(isoToHours(e.startTime)));
-      max = Math.max(max, Math.ceil(isoToHours(e.endTime)));
+    Object.entries(entriesByDate).forEach(([date, dayEntries]) => {
+      dayEntries.forEach(e => {
+        min = Math.min(min, Math.floor(hoursIntoDay(e.startTime, date)));
+        max = Math.max(max, Math.ceil(hoursIntoDay(e.endTime, date)));
+      });
     });
-    return [min, Math.min(24, max)];
-  }, [entries]);
+    return [Math.max(0, min), Math.min(24, max)];
+  }, [entriesByDate]);
 
   const daySeconds = (date) => (entriesByDate[date] || []).reduce((s, e) => s + (e.duration || 0), 0);
   const dayEarnings = (date) => (entriesByDate[date] || []).reduce((s, e) => s + entryEarnings(e), 0);
@@ -83,7 +80,7 @@ function CalendarPage() {
   const weekEarnings = entries.reduce((s, e) => s + entryEarnings(e), 0);
 
   const gridHeight = (endHour - startHour) * HOUR_HEIGHT;
-  const nowHours = getNZHoursDecimal();
+  const nowHours = getLocalHoursDecimal();
 
   const rangeLabel = (() => {
     const fmt = (dateStr) => {
@@ -209,14 +206,18 @@ function CalendarPage() {
 
                     {/* Entries */}
                     {(entriesByDate[date] || []).map(entry => {
-                      const top = (isoToHours(entry.startTime) - startHour) * HOUR_HEIGHT;
-                      const height = Math.max(6, (isoToHours(entry.endTime) - isoToHours(entry.startTime)) * HOUR_HEIGHT);
+                      // Entries split under a previous timezone may cross this zone's midnight —
+                      // clamp to the visible day column rather than spilling past it
+                      const startHours = Math.max(startHour, hoursIntoDay(entry.startTime, date));
+                      const endHours = Math.min(endHour, hoursIntoDay(entry.endTime, date));
+                      const top = (startHours - startHour) * HOUR_HEIGHT;
+                      const height = Math.max(6, (endHours - startHours) * HOUR_HEIGHT);
                       return (
                         <div
                           key={entry.timeEntryId}
                           className="absolute left-0.5 right-0.5 rounded-md overflow-hidden z-10 shadow-sm"
                           style={{ top: `${top}px`, height: `${height}px`, backgroundColor: entry.projectColor || '#6366f1' }}
-                          title={`${entry.taskName} — ${entry.projectName}\n${formatNZTimeRange(entry.startTime, entry.endTime)} · ${formatDurationCompact(entry.duration || 0)} · ${formatNZD(entryEarnings(entry))}`}
+                          title={`${entry.taskName} — ${entry.projectName}\n${formatTimeRange(entry.startTime, entry.endTime)} · ${formatDurationCompact(entry.duration || 0)} · ${formatNZD(entryEarnings(entry))}`}
                         >
                           {height >= 18 && (
                             <div className="px-1.5 py-0.5 flex items-center gap-1 text-[11px] leading-tight text-white/95 font-medium" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>

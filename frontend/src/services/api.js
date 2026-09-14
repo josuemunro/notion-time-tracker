@@ -41,6 +41,8 @@ apiClient.interceptors.response.use(
 export const getActiveTimer = () => apiClient.get('/time-entries/active');
 export const startTimer = (taskId) => apiClient.post('/time-entries/start', { taskId });
 export const stopTimer = (timeEntryId) => apiClient.post(`/time-entries/${timeEntryId}/stop`);
+// A running timer crossed local midnight: close it at midnight and continue as a new entry
+export const rolloverTimer = (timeEntryId) => apiClient.post(`/time-entries/${timeEntryId}/rollover`);
 export const syncNotion = () => apiClient.post('/sync/notion'); // Will now be POST to /api/sync/notion
 
 // Time Entries
@@ -83,5 +85,14 @@ export const createProject = (projectData) => apiClient.post('/projects', projec
 // Auth
 export const login = (password) => apiClient.post('/auth/login', { password });
 export const checkAuth = () => apiClient.get('/auth/check');
+
+// Settings
+export const getSettings = () => apiClient.get('/settings');
+export const updateSettings = (settings) => apiClient.put('/settings', settings);
+
+// Backups (blobs, since a plain link can't carry the auth header)
+export const downloadBackup = () => apiClient.get('/backup', { responseType: 'blob' });
+export const getBackupSnapshots = () => apiClient.get('/backup/snapshots');
+export const downloadBackupSnapshot = (name) => apiClient.get(`/backup/snapshots/${encodeURIComponent(name)}`, { responseType: 'blob' });
 
 export default apiClient;

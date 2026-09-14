@@ -1,6 +1,6 @@
-import React, { createContext, useState, useEffect, useCallback, useContext } from 'react';
-import { getActiveTimer, startTimer as apiStartTimer, stopTimer as apiStopTimer } from '../services/api';
-import { formatTimerDisplay } from '../utils/timeUtils';
+import React, { createContext, useState, useEffect, useCallback, useContext, useRef } from 'react';
+import { getActiveTimer, startTimer as apiStartTimer, stopTimer as apiStopTimer, rolloverTimer as apiRolloverTimer } from '../services/api';
+import { formatTimerDisplay, getLocalDateString } from '../utils/timeUtils';
 
 // Favicon management functions
 const createRecordingFavicon = (isBreathing = false) => {
@@ -101,6 +101,19 @@ export const TimerProvider = ({ children }) => {
     };
   }, []);
 
+  // Ref mirror so long-lived closures (the 1s tick) always see current listeners
+  const callbacksRef = useRef(timerChangeCallbacks);
+  callbacksRef.current = timerChangeCallbacks;
+  const notifyTimerChange = useCallback(() => {
+    callbacksRef.current.forEach(callback => {
+      try {
+        callback();
+      } catch (error) {
+        console.error('Error calling timer change callback:', error);
+      }
+    });
+  }, []);
+
   const fetchCurrentActiveTimer = useCallback(async (quiet = false) => {
     if (!quiet) setIsLoading(true);
     try {
@@ -126,30 +139,49 @@ export const TimerProvider = ({ children }) => {
     fetchCurrentActiveTimer();
   }, [fetchCurrentActiveTimer]);
 
+  // Midnight rollover guard: one request in flight at a time, and back off after a failure
+  const rolloverState = useRef({ inFlight: false, retryAfter: 0 });
+
   useEffect(() => {
     let interval;
     if (activeTimerDetails?.startTime) {
-      const calculateElapsedTime = () => {
+      const start = new Date(activeTimerDetails.startTime);
+      const tick = () => {
         const now = new Date();
-        // Convert current time to NZ using Intl (handles DST automatically)
-        const nzStr = now.toLocaleString('en-US', { timeZone: 'Pacific/Auckland' });
-        const nzComponents = new Date(nzStr);
-        const nzNow = new Date(Date.UTC(
-          nzComponents.getFullYear(), nzComponents.getMonth(), nzComponents.getDate(),
-          nzComponents.getHours(), nzComponents.getMinutes(), nzComponents.getSeconds()
-        ));
+        // Both are real UTC instants, so elapsed time is a plain difference
+        setElapsedTime(Math.max(0, Math.floor((now - start) / 1000)));
 
-        const start = new Date(activeTimerDetails.startTime);
-        const elapsedSeconds = Math.floor((nzNow - start) / 1000);
-        setElapsedTime(Math.max(0, elapsedSeconds));
+        // Crossed local midnight (in the configured timezone): ask the server to close
+        // this entry at midnight and continue as a fresh entry from midnight onwards.
+        // The server re-checks, so a stale client view is harmless.
+        const guard = rolloverState.current;
+        if (getLocalDateString(now) !== getLocalDateString(start) && !guard.inFlight && Date.now() >= guard.retryAfter) {
+          guard.inFlight = true;
+          apiRolloverTimer(activeTimerDetails.timeEntryId)
+            .then(({ data }) => {
+              if (data?.rolled) {
+                console.log('🌙 Timer rolled over midnight → new entry', data.timeEntryId);
+                notifyTimerChange();
+                return fetchCurrentActiveTimer(true); // pick up the new entry
+              }
+              // Server disagrees that midnight has passed (zone mismatch) — don't hammer it
+              guard.retryAfter = Date.now() + 60000;
+            })
+            .catch((error) => {
+              console.error('Failed to roll timer over midnight:', error);
+              guard.retryAfter = Date.now() + 60000;
+              fetchCurrentActiveTimer(true);
+            })
+            .finally(() => { guard.inFlight = false; });
+        }
       };
-      calculateElapsedTime(); // Initial calculation
-      interval = setInterval(calculateElapsedTime, 1000);
+      tick(); // Initial calculation
+      interval = setInterval(tick, 1000);
     } else {
       setElapsedTime(0);
     }
     return () => clearInterval(interval);
-  }, [activeTimerDetails]);
+  }, [activeTimerDetails, fetchCurrentActiveTimer, notifyTimerChange]);
 
   // Update document title when timer is running
   useEffect(() => {
@@ -214,13 +246,7 @@ export const TimerProvider = ({ children }) => {
 
       // Notify listeners (e.g. timeline) — starting a timer may have auto-stopped
       // the previous one on the backend, so views need to refresh
-      timerChangeCallbacks.forEach(callback => {
-        try {
-          callback();
-        } catch (error) {
-          console.error('Error calling timer change callback:', error);
-        }
-      });
+      notifyTimerChange();
     } catch (error) {
       console.error("Failed to start timer:", error);
       // Optionally, refetch active timer to ensure UI consistency
@@ -242,13 +268,7 @@ export const TimerProvider = ({ children }) => {
       setFaviconBreathing(false);
 
       // Call all registered callbacks when timer stops
-      timerChangeCallbacks.forEach(callback => {
-        try {
-          callback();
-        } catch (error) {
-          console.error('Error calling timer change callback:', error);
-        }
-      });
+      notifyTimerChange();
     } catch (error) {
       console.error("Failed to stop timer:", error);
       // Optionally, refetch active timer to ensure UI consistency

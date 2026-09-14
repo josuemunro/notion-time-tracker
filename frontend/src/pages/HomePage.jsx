@@ -1,8 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTimer } from '../contexts/TimerContext';
 import { useToast } from '../contexts/ToastContext';
-import { getTasksInProgress, getTimeEntries, updateTaskStatus } from '../services/api';
+import { getTasksInProgress, getTimeEntries, updateTaskStatus, deleteTimeEntry, addManualTimeEntry } from '../services/api';
+import { useSettings } from '../contexts/SettingsContext';
 import TaskItem from '../components/common/TaskItem';
 import TimelineView from '../components/TimelineView';
 import MoneyTimer from '../components/MoneyTimer';
@@ -10,8 +11,8 @@ import ProjectIcon from '../components/ProjectIcon';
 import AddTaskModal from '../components/AddTaskModal';
 import TaskPricingModal from '../components/TaskPricingModal';
 import EmptyState from '../components/common/EmptyState';
-import { PlayIcon, StopIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, ListBulletIcon, PlusIcon } from '@heroicons/react/24/solid';
-import { getNZDateString, formatNZTime, formatDurationHuman } from '../utils/timeUtils';
+import { PlayIcon, StopIcon, ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, ListBulletIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid';
+import { getLocalDateString, formatTime, formatDurationHuman, addDays, formatDateString } from '../utils/timeUtils';
 
 function HomePage() {
   const {
@@ -21,9 +22,11 @@ function HomePage() {
     startTimer,
     stopTimer,
     isLoadingTimer,
-    refreshActiveTimer
+    refreshActiveTimer,
+    registerTimerChangeCallback
   } = useTimer();
-  const { showSuccess, showError } = useToast();
+  const { showSuccess, showError, showUndo } = useToast();
+  const { timeZone } = useSettings();
 
   const [inProgressTasksByProject, setInProgressTasksByProject] = useState([]);
   const [isLoadingTasks, setIsLoadingTasks] = useState(true);
@@ -39,27 +42,35 @@ function HomePage() {
   const [searchParams] = useSearchParams();
   const dateParam = searchParams.get('date');
   const [selectedDate, setSelectedDate] = useState(() =>
-    /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') ? dateParam : getNZDateString()
+    /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') ? dateParam : getLocalDateString()
   );
+  const [timelineRefresh, setTimelineRefresh] = useState(0); // bump to make the timeline refetch
 
   useEffect(() => {
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam || '')) setSelectedDate(dateParam);
   }, [dateParam]);
 
-  // Memoize today's date for comparison using NZ timezone
-  const todayDate = useMemo(() => getNZDateString(), []);
+  // "Today" in the configured timezone. Re-checked every 30s so the badge, the
+  // timeline's now-line and a rolled-over timer all follow the day change at midnight.
+  const [todayDate, setTodayDate] = useState(() => getLocalDateString());
+  useEffect(() => {
+    const check = () => {
+      const today = getLocalDateString();
+      setTodayDate(prevToday => {
+        if (today === prevToday) return prevToday;
+        // Keep following "today" if that's what was being viewed
+        setSelectedDate(prev => (prev === prevToday ? today : prev));
+        return today;
+      });
+    };
+    check();
+    const interval = setInterval(check, 30000);
+    return () => clearInterval(interval);
+  }, [timeZone]);
 
   // Navigation functions
   const navigateToDate = (direction) => {
-    setSelectedDate(prevDate => {
-      const currentDate = new Date(prevDate);
-      if (direction === 'prev') {
-        currentDate.setDate(currentDate.getDate() - 1);
-      } else {
-        currentDate.setDate(currentDate.getDate() + 1);
-      }
-      return getNZDateString(currentDate);
-    });
+    setSelectedDate(prevDate => addDays(prevDate, direction === 'prev' ? -1 : 1));
   };
 
   const goToToday = () => {
@@ -114,19 +125,21 @@ function HomePage() {
     fetchInProgress();
   }, []);
 
+  // Always fetch the day's entries (the tab badge shows the count even when not active)
   useEffect(() => {
-    if (activeTab === 'entries') {
-      fetchDayEntries();
-    }
-  }, [activeTab, selectedDate]);
+    fetchDayEntries();
+  }, [selectedDate]);
 
   // Refresh when timer stops
   useEffect(() => {
     if (!isRunning) {
       fetchInProgress();
-      if (activeTab === 'entries') fetchDayEntries();
+      fetchDayEntries();
     }
   }, [isRunning])
+
+  // Timer start/stop/midnight-rollover changes the day's entries
+  useEffect(() => registerTimerChangeCallback(fetchDayEntries), [registerTimerChangeCallback, selectedDate]);
 
   const handleQuickStart = (taskId, taskName, projectName) => {
     startTimer(taskId, taskName, projectName);
@@ -150,6 +163,30 @@ function HomePage() {
   const handleTaskCreated = () => {
     showSuccess('Task added to Quick Start');
     fetchInProgress();
+  };
+
+  // Delete a finished entry from the day list, with an undo that re-creates it
+  const handleDeleteEntry = async (entry) => {
+    if (!entry.endTime) return; // the running timer is stopped, not deleted
+    setDayEntries(prev => prev.filter(e => e.timeEntryId !== entry.timeEntryId));
+    try {
+      await deleteTimeEntry(entry.timeEntryId);
+      setTimelineRefresh(n => n + 1);
+      showUndo(`Deleted ${entry.taskName} (${formatDurationHuman(entry.duration)})`, async () => {
+        try {
+          await addManualTimeEntry({ taskId: entry.taskId, startTime: entry.startTime, endTime: entry.endTime });
+          fetchDayEntries();
+          setTimelineRefresh(n => n + 1);
+        } catch (err) {
+          console.error('Failed to restore time entry:', err);
+          showError('Failed to restore entry');
+        }
+      });
+    } catch (err) {
+      console.error('Failed to delete time entry:', err);
+      showError('Failed to delete entry');
+      fetchDayEntries();
+    }
   };
 
   if (isLoadingTimer) {
@@ -191,7 +228,7 @@ function HomePage() {
 
           <div className="flex items-center space-x-4">
             <h2 className="text-lg font-semibold text-gray-900">
-              {new Date(selectedDate).toLocaleDateString('en-NZ', {
+              {formatDateString(selectedDate, {
                 weekday: 'long',
                 year: 'numeric',
                 month: 'long',
@@ -221,7 +258,7 @@ function HomePage() {
           </button>
         </div>
 
-        <TimelineView selectedDate={selectedDate} />
+        <TimelineView selectedDate={selectedDate} refreshToken={timelineRefresh} onEntriesChanged={fetchDayEntries} />
       </div>
 
       {/* Tabbed section: one card, the tab bar is its header (single structural line) */}
@@ -247,7 +284,7 @@ function HomePage() {
             }`}
           >
             <ClockIcon className="h-5 w-5" />
-            Today's Entries
+            {selectedDate === todayDate ? "Today's Entries" : "Day's Entries"}
             {dayEntries.length > 0 && (
               <span className="ml-1 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{dayEntries.length}</span>
             )}
@@ -381,12 +418,24 @@ function HomePage() {
                       </div>
                       <div className="text-right flex-shrink-0">
                         <div className="text-sm font-medium text-gray-700 tabular-nums">
-                          {formatNZTime(entry.startTime)} – {entry.endTime ? formatNZTime(entry.endTime) : 'Running'}
+                          {formatTime(entry.startTime)} – {entry.endTime ? formatTime(entry.endTime) : 'Running'}
                         </div>
                         <div className="text-sm text-gray-500">
-                          {entry.duration ? formatDurationHuman(entry.duration) : 'In progress'}
+                          {entry.endTime ? formatDurationHuman(entry.duration) : 'In progress'}
                         </div>
                       </div>
+                      {entry.endTime ? (
+                        <button
+                          onClick={() => handleDeleteEntry(entry)}
+                          title="Delete entry"
+                          aria-label={`Delete ${entry.taskName} entry`}
+                          className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors flex-shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-300"
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                      ) : (
+                        <div className="w-8 flex-shrink-0" aria-hidden="true" />
+                      )}
                     </div>
                   ))}
                 </div>

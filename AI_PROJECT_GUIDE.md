@@ -72,7 +72,7 @@ notion-time-tracker/
         │   ├── BillingModal.jsx         # Final bill with copy/undo
         │   └── PreviousBillsSection.jsx # Bill history with task breakdowns
         └── utils/
-            ├── timeUtils.js     # Date helpers (NZ timezone)
+            ├── timeUtils.js     # Date helpers (zone-aware via the configured display timezone)
             └── billingUtils.js  # Billing + earnings math (mirrors server rules)
 ```
 
@@ -264,7 +264,7 @@ The Notion integration expects these exact property names:
 
 ## Key Design Decisions
 
-1. **Timezone**: All date logic uses `Pacific/Auckland` (NZ time). See `utils/timeUtils.js`. Timestamps are stored as **NZ wall-clock time encoded as UTC ISO strings** (`getNZTimestamp()` pattern) — format them with `timeZone: 'UTC'` when displaying to avoid double-shifting.
+1. **Timezone**: Timestamps are **real UTC ISO strings**. Calendar-day logic (day boundaries, timeline positions, midnight splitting) uses the display timezone stored in `Settings.timeZone` (default `Pacific/Auckland`, editable on the Settings page). Frontend: always go through `utils/timeUtils.js`; backend: `utils/time.js`. Never use `getUTC*` or the browser's local zone for display. Time entries never cross local midnight — the server splits them, and a running timer rolls over via `POST /time-entries/:id/rollover`.
 2. **Currency**: NZD with 15% GST for billing calculations.
 3. **Billing rounding + per-task pricing**: Hours round up to 0.25h. Tasks may carry local-only pricing (`fixedPrice` or `hourlyRateOverride`, set via `TaskPricingModal`, never synced to Notion): fixed tasks bill their flat price, override tasks bill their rounded hours at their own rate, everything else pools hours (rounded once) at the project rate. Client math in `utils/billingUtils.js`; server (bills endpoint in `projects.js`) is the source of truth. The MoneyTimer shows hourly earnings ticking up, or a fixed task's live effective $/hr ticking down.
 4. **Icon caching**: Notion file URLs expire after ~1 hour, so project icons are downloaded on sync and served statically (from the `/data` volume in production).
@@ -326,4 +326,4 @@ NOTION_USER_ID=<uuid>          # Optional — filters tasks by assignee
 - [ ] Verify Notion env vars are set in `.env`
 - [ ] After any sync-related changes, test with `POST /api/sync/notion`
 - [ ] After any timeline changes, test drag/resize/create/delete in the UI
-- [ ] Timestamps use NZ timezone — double-check date boundary logic
+- [ ] Timestamps are UTC; day boundaries come from the configured timezone — double-check boundary logic

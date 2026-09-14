@@ -1,63 +1,102 @@
 // notion-time-tracker/backend/src/routes/timeEntries.js
+//
+// Timestamps are real UTC ISO strings. Calendar-day logic (which day an entry
+// belongs to, where midnight falls) uses the user's configured timezone from
+// Settings. Invariant: a stored entry never spans a local midnight — every
+// write path splits crossing intervals into one row per calendar day.
 const express = require('express');
 const router = express.Router();
-const database = require('../database'); // Import the database module
+const database = require('../database');
+const settings = require('../settings');
+const { splitAtLocalMidnights, dayBounds, dayStart, addDays, localDateString, nowIso } = require('../utils/time');
 
-function getNZTimestamp() {
-  const now = new Date();
-  const nzStr = now.toLocaleString('en-US', { timeZone: 'Pacific/Auckland' });
-  const nzDate = new Date(nzStr);
-  return new Date(Date.UTC(
-    nzDate.getFullYear(), nzDate.getMonth(), nzDate.getDate(),
-    nzDate.getHours(), nzDate.getMinutes(), nzDate.getSeconds()
-  )).toISOString();
+const dbGet = (db, sql, params = []) => new Promise((resolve, reject) =>
+  db.get(sql, params, (err, row) => err ? reject(err) : resolve(row)));
+const dbAll = (db, sql, params = []) => new Promise((resolve, reject) =>
+  db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows)));
+const dbRun = (db, sql, params = []) => new Promise((resolve, reject) =>
+  db.run(sql, params, function (err) { err ? reject(err) : resolve(this); }));
+
+async function withTransaction(db, work) {
+  await dbRun(db, 'BEGIN TRANSACTION;');
+  try {
+    const result = await work();
+    await dbRun(db, 'COMMIT;');
+    return result;
+  } catch (err) {
+    await dbRun(db, 'ROLLBACK;').catch(() => { });
+    throw err;
+  }
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const isValidIso = (value) => typeof value === 'string' && !Number.isNaN(new Date(value).getTime());
+const toIso = (value) => new Date(value).toISOString();
+
+const ENTRY_SELECT = `
+  SELECT
+    te.id AS timeEntryId,
+    te.startTime,
+    te.endTime,
+    te.duration,
+    t.id AS taskId,
+    t.name AS taskName,
+    t.notionId AS taskNotionId,
+    t.fixedPrice,
+    t.hourlyRateOverride,
+    (SELECT COALESCE(SUM(te2.duration), 0) FROM TimeEntries te2 WHERE te2.taskId = t.id AND te2.endTime IS NOT NULL) AS taskTotalSeconds,
+    p.id AS projectId,
+    p.name AS projectName,
+    p.notionId AS projectNotionId,
+    p.hourlyRate,
+    p.color AS projectColor,
+    p.iconType AS projectIconType,
+    p.iconValue AS projectIconValue,
+    c.id AS clientId,
+    c.name AS clientName,
+    c.notionId AS clientNotionId
+  FROM TimeEntries te
+  LEFT JOIN Tasks t ON te.taskId = t.id
+  LEFT JOIN Projects p ON t.projectId = p.id
+  LEFT JOIN Clients c ON p.clientId = c.id
+`;
+
+/**
+ * Write the interval [startIso, endIso) for an existing row, splitting at local
+ * midnights: the row itself becomes the first segment and one extra row is
+ * inserted per following day. Returns every row written, in order.
+ * Caller owns the transaction.
+ */
+async function writeInterval(db, entry, startIso, endIso, timeZone) {
+  const [first, ...rest] = splitAtLocalMidnights(startIso, endIso, timeZone);
+  await dbRun(db, 'UPDATE TimeEntries SET startTime = ?, endTime = ?, duration = ? WHERE id = ?',
+    [first.startTime, first.endTime, first.duration, entry.id]);
+  const written = [{ timeEntryId: entry.id, ...first }];
+  for (const seg of rest) {
+    const result = await dbRun(db,
+      'INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration) VALUES (?, ?, ?, ?, ?)',
+      [entry.taskId, entry.notionTaskId, seg.startTime, seg.endTime, seg.duration]);
+    written.push({ timeEntryId: result.lastID, ...seg });
+  }
+  return written;
+}
+
+const totalDuration = (entries) => entries.reduce((sum, e) => sum + (e.duration || 0), 0);
+
 // GET /api/time-entries/active - Get the currently active time entry (if any)
-router.get('/active', (req, res, next) => {
-  const db = database.getDb(); // Get db instance inside the handler
+router.get('/active', async (req, res, next) => {
+  const db = database.getDb();
   try {
-    const query = `
-      SELECT
-        te.id AS timeEntryId,
-        te.startTime,
-        t.id AS taskId,
-        t.name AS taskName,
-        t.notionId AS taskNotionId,
-        t.fixedPrice,
-        t.hourlyRateOverride,
-        (SELECT COALESCE(SUM(te2.duration), 0) FROM TimeEntries te2 WHERE te2.taskId = t.id AND te2.endTime IS NOT NULL) AS taskTotalSeconds,
-        p.id AS projectId,
-        p.name AS projectName,
-        p.notionId AS projectNotionId,
-        p.hourlyRate,
-        p.color AS projectColor,
-        p.iconType AS projectIconType,
-        p.iconValue AS projectIconValue,
-        c.id AS clientId,
-        c.name AS clientName,
-        c.notionId AS clientNotionId
-      FROM TimeEntries te
-      LEFT JOIN Tasks t ON te.taskId = t.id
-      LEFT JOIN Projects p ON t.projectId = p.id
-      LEFT JOIN Clients c ON p.clientId = c.id
-      WHERE te.endTime IS NULL
-      ORDER BY te.startTime DESC
-      LIMIT 1;
-    `;
-    db.get(query, [], (err, row) => {
-      if (err) return next(err);
-      if (!row) return res.json(null); // No active timer
-      res.json(row);
-    });
+    const row = await dbGet(db, `${ENTRY_SELECT} WHERE te.endTime IS NULL ORDER BY te.startTime DESC LIMIT 1;`);
+    res.json(row || null);
   } catch (error) {
     next(error);
   }
 });
 
-// POST /api/time-entries/start - Start a timer for a task
+// POST /api/time-entries/start - Start a timer for a task (stops any running timer first)
 router.post('/start', async (req, res, next) => {
-  const db = database.getDb(); // Get db instance inside the handler
+  const db = database.getDb();
   const { taskId } = req.body;
 
   if (!taskId) {
@@ -65,112 +104,82 @@ router.post('/start', async (req, res, next) => {
   }
 
   try {
-    // Using db.serialize to ensure sequential execution for transaction
-    db.serialize(async () => {
-      try {
-        await new Promise((resolve, reject) => db.run('BEGIN TRANSACTION;', err => err ? reject(err) : resolve()));
+    const timeZone = await settings.getTimeZone();
+    const outcome = await withTransaction(db, async () => {
+      const task = await dbGet(db, 'SELECT notionId FROM Tasks WHERE id = ?', [taskId]);
+      if (!task) return { notFound: true };
 
-        const activeTimerQuery = "SELECT id FROM TimeEntries WHERE endTime IS NULL LIMIT 1;";
-        const activeTimer = await new Promise((resolve, reject) => {
-          db.get(activeTimerQuery, [], (err, row) => err ? reject(err) : resolve(row));
-        });
-
-        if (activeTimer) {
-          const nzTimestamp = getNZTimestamp();
-
-          const durationQuery = "SELECT (strftime('%s', ?) - strftime('%s', startTime)) FROM TimeEntries WHERE id = ?;";
-          const durationResult = await new Promise((resolve, reject) => {
-            db.get(durationQuery, [nzTimestamp, activeTimer.id], (err, row) => err ? reject(err) : resolve(row));
-          });
-          const durationSeconds = durationResult ? Object.values(durationResult)[0] : 0;
-
-          const stopQuery = "UPDATE TimeEntries SET endTime = ?, duration = ? WHERE id = ?;";
-          await new Promise((resolve, reject) => {
-            db.run(stopQuery, [nzTimestamp, durationSeconds, activeTimer.id], function (err) { err ? reject(err) : resolve(this); });
-          });
-          console.log(`Timer ${activeTimer.id} stopped due to new timer start.`);
-        }
-
-        const task = await new Promise((resolve, reject) => {
-          db.get("SELECT notionId FROM Tasks WHERE id = ?", [taskId], (err, row) => err ? reject(err) : resolve(row));
-        });
-        if (!task) {
-          await new Promise((resolve, reject) => db.run('ROLLBACK;', err => err ? reject(err) : resolve()));
-          // Important: return here to prevent further execution which leads to headers already sent
-          return res.status(404).json({ message: 'Task not found.' });
-        }
-
-        const startTime = getNZTimestamp();
-        const insertQuery = "INSERT INTO TimeEntries (taskId, notionTaskId, startTime) VALUES (?, ?, ?);";
-        const result = await new Promise((resolve, reject) => {
-          db.run(insertQuery, [taskId, task.notionId, startTime], function (err) { err ? reject(err) : resolve(this); });
-        });
-
-        await new Promise((resolve, reject) => db.run('COMMIT;', err => err ? reject(err) : resolve()));
-        // Ensure response is sent only once
-        if (!res.headersSent) {
-          res.status(201).json({
-            message: 'Timer started successfully.',
-            timeEntryId: result.lastID,
-            taskId: taskId,
-            taskNotionId: task.notionId,
-            startTime: startTime
-          });
-        }
-
-      } catch (dbError) {
-        await new Promise((resolve, reject) => db.run('ROLLBACK;', err => err ? reject(err) : resolve()));
-        if (!res.headersSent) { // Check before passing to next if an error occurred before sending response
-          next(dbError);
-        } else {
-          console.error("DB error after headers sent in /start:", dbError);
-        }
+      const now = nowIso();
+      const active = await dbGet(db, 'SELECT id, taskId, notionTaskId, startTime FROM TimeEntries WHERE endTime IS NULL LIMIT 1;');
+      if (active) {
+        const closed = await writeInterval(db, active, active.startTime, now, timeZone);
+        console.log(`Timer ${active.id} stopped due to new timer start (${closed.length} segment(s)).`);
       }
+
+      const result = await dbRun(db,
+        'INSERT INTO TimeEntries (taskId, notionTaskId, startTime) VALUES (?, ?, ?);',
+        [taskId, task.notionId, now]);
+      return { timeEntryId: result.lastID, taskNotionId: task.notionId, startTime: now };
     });
-  } catch (error) { // Catch errors outside db.serialize (less likely for this structure)
-    if (!res.headersSent) {
-      next(error);
-    } else {
-      console.error("Outer error after headers sent in /start:", error);
-    }
+
+    if (outcome.notFound) return res.status(404).json({ message: 'Task not found.' });
+    res.status(201).json({
+      message: 'Timer started successfully.',
+      timeEntryId: outcome.timeEntryId,
+      taskId,
+      taskNotionId: outcome.taskNotionId,
+      startTime: outcome.startTime,
+    });
+  } catch (error) {
+    next(error);
   }
 });
 
-// POST /api/time-entries - Create a manual time entry
-router.post('/', (req, res, next) => {
+// POST /api/time-entries - Create a manual time entry (one row per calendar day it covers)
+router.post('/', async (req, res, next) => {
   const db = database.getDb();
-  const { taskId, startTime, endTime, duration } = req.body;
+  const { taskId, startTime, endTime } = req.body;
 
   if (!taskId || !startTime || !endTime) {
     return res.status(400).json({ message: 'taskId, startTime, and endTime are required.' });
   }
+  if (!isValidIso(startTime) || !isValidIso(endTime)) {
+    return res.status(400).json({ message: 'startTime and endTime must be ISO 8601 timestamps.' });
+  }
+  if (new Date(endTime) < new Date(startTime)) {
+    return res.status(400).json({ message: 'endTime must not be before startTime.' });
+  }
 
   try {
-    // Verify the task exists and get its notionId
-    db.get("SELECT notionId FROM Tasks WHERE id = ?", [taskId], (err, task) => {
-      if (err) return next(err);
-      if (!task) {
-        return res.status(404).json({ message: 'Task not found.' });
+    const timeZone = await settings.getTimeZone();
+    const task = await dbGet(db, 'SELECT notionId FROM Tasks WHERE id = ?', [taskId]);
+    if (!task) return res.status(404).json({ message: 'Task not found.' });
+
+    const segments = splitAtLocalMidnights(toIso(startTime), toIso(endTime), timeZone);
+    const entries = await withTransaction(db, async () => {
+      const written = [];
+      for (const seg of segments) {
+        const result = await dbRun(db,
+          'INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration) VALUES (?, ?, ?, ?, ?)',
+          [taskId, task.notionId, seg.startTime, seg.endTime, seg.duration]);
+        written.push({ timeEntryId: result.lastID, ...seg });
       }
+      return written;
+    });
 
-      // Calculate duration if not provided
-      const calculatedDuration = duration || Math.floor((new Date(endTime) - new Date(startTime)) / 1000);
-
-      const insertQuery = "INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration) VALUES (?, ?, ?, ?, ?)";
-      db.run(insertQuery, [taskId, task.notionId, startTime, endTime, calculatedDuration], function (err) {
-        if (err) return next(err);
-
-        console.log('Manual time entry created - ID:', this.lastID, 'Duration:', calculatedDuration, 'seconds');
-        res.status(201).json({
-          message: 'Time entry created successfully.',
-          timeEntryId: this.lastID,
-          taskId: taskId,
-          taskNotionId: task.notionId,
-          startTime: startTime,
-          endTime: endTime,
-          duration: calculatedDuration
-        });
-      });
+    console.log('Manual time entry created - IDs:', entries.map(e => e.timeEntryId).join(','), 'Duration:', totalDuration(entries), 'seconds');
+    res.status(201).json({
+      message: entries.length > 1
+        ? `Time entry created and split into ${entries.length} days.`
+        : 'Time entry created successfully.',
+      timeEntryId: entries[0].timeEntryId,
+      taskId,
+      taskNotionId: task.notionId,
+      startTime: entries[0].startTime,
+      endTime: entries[entries.length - 1].endTime,
+      duration: totalDuration(entries),
+      entries,
+      split: entries.length > 1,
     });
   } catch (error) {
     next(error);
@@ -178,73 +187,110 @@ router.post('/', (req, res, next) => {
 });
 
 // POST /api/time-entries/:timeEntryId/stop - Stop a specific timer
-router.post('/:timeEntryId/stop', (req, res, next) => {
+router.post('/:timeEntryId/stop', async (req, res, next) => {
   const db = database.getDb();
   const { timeEntryId } = req.params;
 
-  const endTime = getNZTimestamp();
-
   try {
-    db.get("SELECT startTime FROM TimeEntries WHERE id = ? AND endTime IS NULL", [timeEntryId], (err, entry) => {
-      if (err) return next(err);
-      if (!entry) return res.status(404).json({ message: 'Active time entry not found or already stopped.' });
+    const timeZone = await settings.getTimeZone();
+    const entry = await dbGet(db,
+      'SELECT id, taskId, notionTaskId, startTime FROM TimeEntries WHERE id = ? AND endTime IS NULL', [timeEntryId]);
+    if (!entry) return res.status(404).json({ message: 'Active time entry not found or already stopped.' });
 
-      const durationQuery = "SELECT (strftime('%s', ?) - strftime('%s', startTime)) FROM TimeEntries WHERE id = ?;";
-      db.get(durationQuery, [endTime, timeEntryId], (err, durationResult) => {
-        if (err) return next(err);
-        const durationSeconds = durationResult ? Object.values(durationResult)[0] : 0;
+    const endTime = nowIso();
+    const entries = await withTransaction(db, () => writeInterval(db, entry, entry.startTime, endTime, timeZone));
 
-        const updateQuery = "UPDATE TimeEntries SET endTime = ?, duration = ? WHERE id = ?;";
-        db.run(updateQuery, [endTime, durationSeconds, timeEntryId], function (err) {
-          if (err) return next(err);
-          if (this.changes === 0) {
-            return res.status(404).json({ message: 'Timer not found or could not be stopped.' });
-          }
-          console.log('Timer stopped - Entry ID:', timeEntryId, 'Duration:', durationSeconds, 'EndTime:', endTime);
-          res.json({
-            message: 'Timer stopped successfully.',
-            timeEntryId: timeEntryId,
-            endTime: endTime,
-            duration: durationSeconds
-          });
-        });
-      });
+    console.log('Timer stopped - Entry ID:', timeEntryId, 'Segments:', entries.length, 'Duration:', totalDuration(entries), 'EndTime:', endTime);
+    res.json({
+      message: entries.length > 1
+        ? `Timer stopped and split into ${entries.length} days.`
+        : 'Timer stopped successfully.',
+      timeEntryId: entry.id,
+      endTime,
+      duration: totalDuration(entries),
+      entries,
+      split: entries.length > 1,
     });
   } catch (error) {
     next(error);
   }
 });
 
-// PUT /api/time-entries/:timeEntryId - Update a time entry
-router.put('/:timeEntryId', (req, res, next) => {
+// POST /api/time-entries/:timeEntryId/rollover - A running timer has crossed local
+// midnight: close it at midnight (one row per day passed) and start a fresh timer
+// for the same task from the most recent midnight. No-op if still on its start day.
+router.post('/:timeEntryId/rollover', async (req, res, next) => {
   const db = database.getDb();
   const { timeEntryId } = req.params;
-  const { startTime, endTime, duration } = req.body;
+
+  try {
+    const timeZone = await settings.getTimeZone();
+    const entry = await dbGet(db,
+      'SELECT id, taskId, notionTaskId, startTime FROM TimeEntries WHERE id = ? AND endTime IS NULL', [timeEntryId]);
+    if (!entry) return res.status(404).json({ message: 'Active time entry not found or already stopped.' });
+
+    const now = new Date();
+    const today = localDateString(now, timeZone);
+    if (localDateString(new Date(entry.startTime), timeZone) === today) {
+      return res.json({ rolled: false, timeEntryId: entry.id, startTime: entry.startTime });
+    }
+
+    const lastMidnight = dayStart(today, timeZone).toISOString();
+    const outcome = await withTransaction(db, async () => {
+      const closed = await writeInterval(db, entry, entry.startTime, lastMidnight, timeZone);
+      const result = await dbRun(db,
+        'INSERT INTO TimeEntries (taskId, notionTaskId, startTime) VALUES (?, ?, ?);',
+        [entry.taskId, entry.notionTaskId, lastMidnight]);
+      return { closed, newId: result.lastID };
+    });
+
+    console.log(`Timer ${entry.id} rolled over midnight → closed ${outcome.closed.length} segment(s), new timer ${outcome.newId} from ${lastMidnight}`);
+    res.json({
+      rolled: true,
+      timeEntryId: outcome.newId,
+      taskId: entry.taskId,
+      startTime: lastMidnight,
+      closedEntries: outcome.closed,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/time-entries/:timeEntryId - Update a time entry (splits if it now crosses midnight)
+router.put('/:timeEntryId', async (req, res, next) => {
+  const db = database.getDb();
+  const { timeEntryId } = req.params;
+  const { startTime, endTime } = req.body;
 
   if (!startTime || !endTime) {
     return res.status(400).json({ message: 'startTime and endTime are required.' });
   }
+  if (!isValidIso(startTime) || !isValidIso(endTime)) {
+    return res.status(400).json({ message: 'startTime and endTime must be ISO 8601 timestamps.' });
+  }
+  if (new Date(endTime) < new Date(startTime)) {
+    return res.status(400).json({ message: 'endTime must not be before startTime.' });
+  }
 
   try {
-    // Calculate duration if not provided
-    const calculatedDuration = duration || Math.floor((new Date(endTime) - new Date(startTime)) / 1000);
+    const timeZone = await settings.getTimeZone();
+    const entry = await dbGet(db, 'SELECT id, taskId, notionTaskId FROM TimeEntries WHERE id = ?', [timeEntryId]);
+    if (!entry) return res.status(404).json({ message: 'Time entry not found.' });
 
-    const updateQuery = "UPDATE TimeEntries SET startTime = ?, endTime = ?, duration = ? WHERE id = ?";
-    db.run(updateQuery, [startTime, endTime, calculatedDuration, timeEntryId], function (err) {
-      if (err) return next(err);
+    const entries = await withTransaction(db, () => writeInterval(db, entry, toIso(startTime), toIso(endTime), timeZone));
 
-      if (this.changes === 0) {
-        return res.status(404).json({ message: 'Time entry not found.' });
-      }
-
-      console.log('Time entry updated - ID:', timeEntryId, 'Duration:', calculatedDuration, 'seconds');
-      res.json({
-        message: 'Time entry updated successfully.',
-        timeEntryId: timeEntryId,
-        startTime: startTime,
-        endTime: endTime,
-        duration: calculatedDuration
-      });
+    console.log('Time entry updated - ID:', timeEntryId, 'Segments:', entries.length, 'Duration:', totalDuration(entries), 'seconds');
+    res.json({
+      message: entries.length > 1
+        ? `Time entry updated and split into ${entries.length} days.`
+        : 'Time entry updated successfully.',
+      timeEntryId: entry.id,
+      startTime: entries[0].startTime,
+      endTime: entries[entries.length - 1].endTime,
+      duration: totalDuration(entries),
+      entries,
+      split: entries.length > 1,
     });
   } catch (error) {
     next(error);
@@ -252,118 +298,61 @@ router.put('/:timeEntryId', (req, res, next) => {
 });
 
 // DELETE /api/time-entries/:timeEntryId - Delete a time entry
-router.delete('/:timeEntryId', (req, res, next) => {
+router.delete('/:timeEntryId', async (req, res, next) => {
   const db = database.getDb();
   const { timeEntryId } = req.params;
 
   try {
-    const deleteQuery = "DELETE FROM TimeEntries WHERE id = ?";
-    db.run(deleteQuery, [timeEntryId], function (err) {
-      if (err) return next(err);
-
-      if (this.changes === 0) {
-        return res.status(404).json({ message: 'Time entry not found.' });
-      }
-
-      console.log('Time entry deleted - ID:', timeEntryId);
-      res.json({
-        message: 'Time entry deleted successfully.',
-        timeEntryId: timeEntryId
-      });
-    });
+    const result = await dbRun(db, 'DELETE FROM TimeEntries WHERE id = ?', [timeEntryId]);
+    if (result.changes === 0) {
+      return res.status(404).json({ message: 'Time entry not found.' });
+    }
+    console.log('Time entry deleted - ID:', timeEntryId);
+    res.json({ message: 'Time entry deleted successfully.', timeEntryId });
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/time-entries - Get time entries with optional date filtering
-router.get('/', (req, res, next) => {
+// GET /api/time-entries - List entries, optionally filtered to local calendar days.
+//   ?date=YYYY-MM-DD                      one day
+//   ?startDate=YYYY-MM-DD&endDate=...     inclusive day range (either side optional)
+// Day boundaries are local midnights in the configured timezone.
+router.get('/', async (req, res, next) => {
   const db = database.getDb();
   const { date, startDate, endDate } = req.query;
 
-  let query = `
-    SELECT
-      te.id AS timeEntryId,
-      te.startTime,
-      te.endTime,
-      te.duration,
-      t.id AS taskId,
-      t.name AS taskName,
-      t.notionId AS taskNotionId,
-      t.fixedPrice,
-      t.hourlyRateOverride,
-      (SELECT COALESCE(SUM(te2.duration), 0) FROM TimeEntries te2 WHERE te2.taskId = t.id AND te2.endTime IS NOT NULL) AS taskTotalSeconds,
-      p.id AS projectId,
-      p.name AS projectName,
-      p.notionId AS projectNotionId,
-      p.hourlyRate,
-      p.iconType AS projectIconType,
-      p.iconValue AS projectIconValue,
-      p.color AS projectColor,
-      c.id AS clientId,
-      c.name AS clientName,
-      c.notionId AS clientNotionId
-    FROM TimeEntries te
-    LEFT JOIN Tasks t ON te.taskId = t.id
-    LEFT JOIN Projects p ON t.projectId = p.id
-    LEFT JOIN Clients c ON p.clientId = c.id
-  `;
-
-  const params = [];
-  const conditions = [];
-
-  if (date) {
-    // Get entries for a specific date (YYYY-MM-DD)
-    // Use SUBSTR to extract date part from ISO datetime string
-    conditions.push("SUBSTR(te.startTime, 1, 10) = ?");
-    params.push(date);
-  } else if (startDate && endDate) {
-    // Get entries between two dates
-    conditions.push("SUBSTR(te.startTime, 1, 10) >= ? AND SUBSTR(te.startTime, 1, 10) <= ?");
-    params.push(startDate, endDate);
-  } else if (startDate) {
-    // Get entries from startDate onwards
-    conditions.push("SUBSTR(te.startTime, 1, 10) >= ?");
-    params.push(startDate);
-  } else if (endDate) {
-    // Get entries up to endDate
-    conditions.push("SUBSTR(te.startTime, 1, 10) <= ?");
-    params.push(endDate);
+  for (const [name, value] of Object.entries({ date, startDate, endDate })) {
+    if (value !== undefined && !DATE_RE.test(value)) {
+      return res.status(400).json({ message: `${name} must be YYYY-MM-DD.` });
+    }
   }
-
-  if (conditions.length > 0) {
-    query += " WHERE " + conditions.join(" AND ");
-  }
-
-  query += " ORDER BY te.startTime ASC";
 
   try {
-    console.log('Time Entries API - Query:', query);
-    console.log('Time Entries API - Params:', params);
+    const timeZone = await settings.getTimeZone();
+    const conditions = [];
+    const params = [];
 
-    // Debug: Let's check what the SUBSTR actually returns
     if (date) {
-      const debugQuery = `
-        SELECT 
-          te.id,
-          te.startTime,
-          SUBSTR(te.startTime, 1, 10) as extractedDate,
-          ? as requestedDate
-        FROM TimeEntries te 
-        LIMIT 5
-      `;
-      db.all(debugQuery, [date], (err, debugRows) => {
-        if (!err) {
-          console.log('DEBUG - Date extraction comparison:', debugRows);
-        }
-      });
+      const { start, end } = dayBounds(date, timeZone);
+      conditions.push('te.startTime >= ? AND te.startTime < ?');
+      params.push(start.toISOString(), end.toISOString());
+    } else {
+      if (startDate) {
+        conditions.push('te.startTime >= ?');
+        params.push(dayStart(startDate, timeZone).toISOString());
+      }
+      if (endDate) {
+        conditions.push('te.startTime < ?');
+        params.push(dayStart(addDays(endDate, 1), timeZone).toISOString());
+      }
     }
 
-    db.all(query, params, (err, rows) => {
-      if (err) return next(err);
-      console.log('Time Entries API - Results:', rows);
-      res.json(rows);
-    });
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const rows = await dbAll(db, `${ENTRY_SELECT}${where} ORDER BY te.startTime ASC`, params);
+
+    // Which local calendar day each entry belongs to (handy for grouping client-side)
+    res.json(rows.map(row => ({ ...row, localDate: localDateString(new Date(row.startTime), timeZone) })));
   } catch (error) {
     next(error);
   }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { XMarkIcon, MagnifyingGlassIcon } from '@heroicons/react/24/solid';
 import { getTasks } from '../services/api';
+import { formatTime } from '../utils/timeUtils';
 import ProjectIcon from './ProjectIcon';
 
 const TaskSelectionModal = ({ isOpen, onClose, onSelectTask, startTime, endTime }) => {
@@ -47,13 +48,6 @@ const TaskSelectionModal = ({ isOpen, onClose, onSelectTask, startTime, endTime 
     if (selectedTask) {
       onSelectTask(selectedTask, startTime, endTime);
     }
-  };
-
-  const formatTime = (timeString) => {
-    return new Date(timeString).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
   };
 
   const calculateDuration = () => {

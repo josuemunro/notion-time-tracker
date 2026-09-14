@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTimer } from '../contexts/TimerContext';
 import { getTimeEntries } from '../services/api';
-import { formatTimerDisplay, formatDurationHuman, getNZDateString } from '../utils/timeUtils';
+import { formatTimerDisplay, formatDurationHuman, getLocalDateString } from '../utils/timeUtils';
 import { entryEarnings, formatNZD } from '../utils/billingUtils';
 import ProjectIcon from './ProjectIcon';
 
@@ -177,7 +177,7 @@ function MoneyTimer() {
 
   const fetchToday = async () => {
     try {
-      const { data } = await getTimeEntries({ date: getNZDateString() });
+      const { data } = await getTimeEntries({ date: getLocalDateString() });
       setTodayEntries(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Failed to fetch today entries:', err);
