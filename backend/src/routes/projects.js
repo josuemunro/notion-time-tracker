@@ -56,9 +56,9 @@ router.get('/active', async (req, res, next) => {
   }
 });
 
-// GET /api/projects/:projectId - A project with its tasks (incl. invoice dates and
-// payment splits), logged time, and billingItems: what's unbilled and when to
-// invoice it (services/billing)
+// GET /api/projects/:projectId - A project with its tasks (incl. invoice dates, payment
+// splits, unbilled hours), logged time, billingItems (what's unbilled and when to
+// invoice it — services/billing) and billedTotals (bills so far, ex GST)
 router.get('/:projectId', async (req, res, next) => {
   const { projectId: idOrNotionId } = req.params;
   try {
@@ -83,6 +83,7 @@ router.get('/:projectId', async (req, res, next) => {
         t.id, t.notionId, t.name, t.status, t.isBillable, t.beenBilled, t.isManual,
         t.fixedPrice, t.hourlyRateOverride, t.invoiceDate,
         COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent,
+        COALESCE(SUM(CASE WHEN te.billId IS NULL THEN te.duration END), 0) / 3600.0 AS unbilledHours,
         (SELECT te_active.startTime FROM TimeEntries te_active WHERE te_active.taskId = t.id AND te_active.endTime IS NULL LIMIT 1) AS activeTimerStartTime
       FROM Tasks t
       LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
@@ -91,14 +92,16 @@ router.get('/:projectId', async (req, res, next) => {
       ORDER BY t.name COLLATE NOCASE
     `, [project.id]);
 
-    const [installmentsByTask, billingItems] = await Promise.all([
+    const [installmentsByTask, billingItems, billedTotals] = await Promise.all([
       billing.getInstallmentsByTask(tasks.map(t => t.id)),
       billing.getProjectBillingItems(project.id),
+      billing.getBilledTotals(project.id),
     ]);
     res.json({
       ...project,
       tasks: tasks.map(t => ({ ...t, installments: installmentsByTask.get(t.id) || [] })),
       billingItems,
+      billedTotals,
     });
   } catch (error) {
     next(error);
@@ -196,63 +199,14 @@ router.put('/:projectId', async (req, res, next) => {
   }
 });
 
-// PUT /api/projects/:projectId/tasks/billing - Update billing status for multiple tasks
-router.put('/:projectId/tasks/billing', async (req, res, next) => {
-  const db = database.getDb();
-  const { projectId } = req.params;
-  const { taskIds, beenBilled } = req.body;
-
-  if (!Array.isArray(taskIds) || taskIds.length === 0) {
-    return res.status(400).json({ message: 'taskIds array is required and cannot be empty.' });
-  }
-
-  if (typeof beenBilled !== 'boolean') {
-    return res.status(400).json({ message: 'beenBilled must be a boolean.' });
-  }
-
-  try {
-    // First verify that all tasks belong to the specified project
-    const verifyQuery = `
-      SELECT COUNT(*) as count 
-      FROM Tasks t 
-      JOIN Projects p ON t.projectId = p.id 
-      WHERE t.id IN (${taskIds.map(() => '?').join(',')}) 
-      AND (p.id = ? OR p.notionId = ?)
-    `;
-
-    db.get(verifyQuery, [...taskIds, projectId, projectId], (err, result) => {
-      if (err) return next(err);
-
-      if (result.count !== taskIds.length) {
-        return res.status(400).json({ message: 'Some tasks do not belong to this project.' });
-      }
-
-      // Update the billing status
-      const updateQuery = `
-        UPDATE Tasks 
-        SET beenBilled = ? 
-        WHERE id IN (${taskIds.map(() => '?').join(',')})
-      `;
-
-      db.run(updateQuery, [beenBilled, ...taskIds], function (err) {
-        if (err) return next(err);
-        res.json({
-          message: `Updated billing status for ${this.changes} tasks.`,
-          tasksUpdated: this.changes,
-          beenBilled
-        });
-      });
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
 // POST /api/projects/:projectId/bills - Create a bill snapshot and mark what it covers as billed.
-// Body: { taskIds?: number[], installmentIds?: number[] } — whole tasks, and/or payments
-// of fixed-price tasks that are split into installments (those tasks can only be
-// billed through their payments). A split task counts as billed once every
-// payment is.
+// Body: { taskIds?: number[], installmentIds?: number[] }
+// - hourly tasks bill their time entries not yet on a bill (hours so far); the
+//   entries get this billId, so time logged later shows up as unbilled again
+// - fixed-price tasks bill their price once (beenBilled)
+// - split fixed-price tasks are billed through their payments (installmentIds);
+//   the task counts as billed once every payment is
+// A task's invoiceDate is used up by billing it (kept on the line for undo).
 router.post('/:projectId/bills', async (req, res, next) => {
   const { projectId } = req.params;
   const { taskIds = [], installmentIds = [] } = req.body;
@@ -267,15 +221,12 @@ router.post('/:projectId/bills', async (req, res, next) => {
     const project = await dbGet(`SELECT id, hourlyRate FROM Projects WHERE id = ? OR notionId = ?`, [projectId, projectId]);
     if (!project) return res.status(404).json({ message: 'Project not found.' });
 
-    // Snapshot each task's name, hours, and pricing at billing time
+    // Snapshot each task's name, pricing and the time this bill covers
     const tasks = taskIds.length === 0 ? [] : await dbAll(`
-      SELECT t.id, t.name, t.fixedPrice, t.hourlyRateOverride,
-             COALESCE(SUM(te.duration), 0) / 3600.0 AS hoursSpent,
+      SELECT t.id, t.name, t.fixedPrice, t.hourlyRateOverride, t.beenBilled, t.invoiceDate,
              (SELECT COUNT(*) FROM TaskInstallments i WHERE i.taskId = t.id) AS installmentCount
       FROM Tasks t
-      LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
       WHERE t.id IN (${placeholders(taskIds)}) AND t.projectId = ?
-      GROUP BY t.id
     `, [...taskIds, project.id]);
     if (tasks.length !== taskIds.length) {
       return res.status(400).json({ message: 'Some tasks do not belong to this project.' });
@@ -283,6 +234,21 @@ router.post('/:projectId/bills', async (req, res, next) => {
     const splitTask = tasks.find(t => t.installmentCount > 0);
     if (splitTask) {
       return res.status(400).json({ message: `"${splitTask.name}" is split into payments; bill its payments instead.` });
+    }
+
+    // Finished entries not yet on a bill: hourly tasks bill exactly these
+    const entries = taskIds.length === 0 ? [] : await dbAll(`
+      SELECT id, taskId, duration FROM TimeEntries
+      WHERE taskId IN (${placeholders(taskIds)}) AND endTime IS NOT NULL AND billId IS NULL
+    `, taskIds);
+    for (const t of tasks) {
+      const own = entries.filter(e => e.taskId === t.id);
+      t.entryIds = own.map(e => e.id);
+      t.unbilledHours = own.reduce((sum, e) => sum + (e.duration || 0), 0) / 3600;
+    }
+    const empty = tasks.find(t => (t.fixedPrice != null ? t.beenBilled : t.entryIds.length === 0));
+    if (empty) {
+      return res.status(409).json({ message: `"${empty.name}" has nothing left to bill.` });
     }
 
     const installments = installmentIds.length === 0 ? [] : await dbAll(`
@@ -298,9 +264,10 @@ router.post('/:projectId/bills', async (req, res, next) => {
     }
 
     // Billing rules live in services/billing (mirrored in frontend billingUtils.js);
-    // a payment is a fixed-price line with no hours of its own
+    // a payment is a fixed-price line with no hours of its own. Fixed-price task
+    // lines carry their unbilled hours for the record only.
     const { totalHours, roundedHours, fixedAmount, subtotal, gst, total, rate } = billing.computeBillTotals([
-      ...tasks.map(t => ({ hours: t.hoursSpent, fixedPrice: t.fixedPrice, hourlyRateOverride: t.hourlyRateOverride })),
+      ...tasks.map(t => ({ hours: t.unbilledHours, fixedPrice: t.fixedPrice, hourlyRateOverride: t.hourlyRateOverride })),
       ...installments.map(i => ({ hours: 0, fixedPrice: i.amount, hourlyRateOverride: null })),
     ], project.hourlyRate);
     const createdAt = nowIso();
@@ -313,20 +280,29 @@ router.post('/:projectId/bills', async (req, res, next) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [project.id, totalHours, roundedHours, rate, subtotal, gst, total, fixedAmount, createdAt]
       ));
-      const insertLine = `INSERT INTO BillTasks (billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+      const insertLine = `INSERT INTO BillTasks (billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId, taskInvoiceDate)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
       for (const t of tasks) {
         await dbRun(insertLine, [
-          billId, t.id, t.name, t.hoursSpent,
+          billId, t.id, t.name, t.unbilledHours,
           t.fixedPrice != null ? t.fixedPrice : null,
           t.fixedPrice != null ? null : (t.hourlyRateOverride != null ? t.hourlyRateOverride : rate),
           null,
+          t.invoiceDate || null,
         ]);
+        if (t.entryIds.length) {
+          await dbRun(`UPDATE TimeEntries SET billId = ? WHERE id IN (${placeholders(t.entryIds)})`, [billId, ...t.entryIds]);
+        }
       }
       for (const i of installments) {
-        await dbRun(insertLine, [billId, i.taskId, `${i.taskName} — ${i.label || 'Payment'}`, 0, i.amount, null, i.id]);
+        await dbRun(insertLine, [billId, i.taskId, `${i.taskName} — ${i.label || 'Payment'}`, 0, i.amount, null, i.id, null]);
       }
       if (taskIds.length) {
-        await dbRun(`UPDATE Tasks SET beenBilled = 1 WHERE id IN (${placeholders(taskIds)})`, taskIds);
+        await dbRun(`UPDATE Tasks SET invoiceDate = NULL WHERE id IN (${placeholders(taskIds)})`, taskIds);
+        const fixedIds = tasks.filter(t => t.fixedPrice != null).map(t => t.id);
+        if (fixedIds.length) {
+          await dbRun(`UPDATE Tasks SET beenBilled = 1 WHERE id IN (${placeholders(fixedIds)})`, fixedIds);
+        }
       }
       if (installmentIds.length) {
         await dbRun(`UPDATE TaskInstallments SET billId = ? WHERE id IN (${placeholders(installmentIds)})`, [billId, ...installmentIds]);
@@ -343,12 +319,13 @@ router.post('/:projectId/bills', async (req, res, next) => {
       throw err;
     }
 
-    console.log(`Bill ${billId} created for project ${project.id}: ${tasks.length} tasks, ${installments.length} payments.`);
+    console.log(`Bill ${billId} created for project ${project.id}: ${tasks.length} tasks (${entries.length} entries), ${installments.length} payments.`);
     res.status(201).json({
       message: 'Bill created successfully.',
       billId, createdAt, totalHours, roundedHours,
       hourlyRate: rate, subtotal, gst, total, fixedAmount,
-      tasks, installments
+      tasks: tasks.map(({ entryIds, ...t }) => ({ ...t, hoursSpent: t.unbilledHours, entryCount: entryIds.length })),
+      installments
     });
   } catch (error) {
     next(error);
@@ -382,46 +359,57 @@ router.get('/:projectId/bills', (req, res, next) => {
   });
 });
 
-// DELETE /api/projects/:projectId/bills/:billId - Delete a bill and un-bill its tasks and payments (undo)
-router.delete('/:projectId/bills/:billId', (req, res, next) => {
-  const db = database.getDb();
+// DELETE /api/projects/:projectId/bills/:billId - Delete a bill and undo what it marked:
+// its time entries and payments go back to unbilled, tasks get back the invoice
+// date the bill used up, and beenBilled is recomputed from the bills that remain.
+router.delete('/:projectId/bills/:billId', async (req, res, next) => {
   const { billId } = req.params;
+  try {
+    const lines = await dbAll(`SELECT taskId, taskInvoiceDate FROM BillTasks WHERE billId = ?`, [billId]);
+    const taskIds = [...new Set(lines.map(l => l.taskId).filter(id => id != null))];
+    const placeholders = taskIds.map(() => '?').join(',');
 
-  db.all(`SELECT taskId FROM BillTasks WHERE billId = ?`, [billId], (err, rows) => {
-    if (err) return next(err);
-    const taskIds = rows.map(r => r.taskId).filter(id => id != null);
+    await dbRun('BEGIN TRANSACTION;');
+    try {
+      const result = await dbRun(`DELETE FROM Bills WHERE id = ?`, [billId]);
+      if (result.changes === 0) {
+        await dbRun('ROLLBACK;');
+        return res.status(404).json({ message: 'Bill not found.' });
+      }
+      // Explicit child cleanup — sqlite3 doesn't enable FK cascades by default
+      await dbRun(`DELETE FROM BillTasks WHERE billId = ?`, [billId]);
+      await dbRun(`UPDATE TimeEntries SET billId = NULL WHERE billId = ?`, [billId]);
+      await dbRun(`UPDATE TaskInstallments SET billId = NULL WHERE billId = ?`, [billId]);
+      for (const line of lines) {
+        if (line.taskId != null && line.taskInvoiceDate) {
+          await dbRun(`UPDATE Tasks SET invoiceDate = ? WHERE id = ? AND invoiceDate IS NULL`, [line.taskInvoiceDate, line.taskId]);
+        }
+      }
+      if (taskIds.length) {
+        // Split task: billed once every payment is. Fixed price: billed if a remaining
+        // bill charged it. Hourly: tracked per entry, so never flagged.
+        await dbRun(`
+          UPDATE Tasks SET beenBilled = CASE
+            WHEN EXISTS (SELECT 1 FROM TaskInstallments i WHERE i.taskId = Tasks.id)
+              THEN NOT EXISTS (SELECT 1 FROM TaskInstallments i WHERE i.taskId = Tasks.id AND i.billId IS NULL)
+            WHEN Tasks.fixedPrice IS NOT NULL
+              THEN EXISTS (SELECT 1 FROM BillTasks bt WHERE bt.taskId = Tasks.id AND bt.installmentId IS NULL AND bt.fixedPrice IS NOT NULL)
+            ELSE 0
+          END
+          WHERE id IN (${placeholders})
+        `, taskIds);
+      }
+      await dbRun('COMMIT;');
+    } catch (err) {
+      await dbRun('ROLLBACK;').catch(() => { });
+      throw err;
+    }
 
-    db.serialize(() => {
-      db.run('BEGIN TRANSACTION;');
-      // Explicit delete — sqlite3 doesn't enable FK cascades by default
-      db.run(`DELETE FROM BillTasks WHERE billId = ?`, [billId], (err) => {
-        if (err) { db.run('ROLLBACK;'); return next(err); }
-        db.run(`DELETE FROM Bills WHERE id = ?`, [billId], function (err) {
-          if (err) { db.run('ROLLBACK;'); return next(err); }
-          if (this.changes === 0) {
-            db.run('ROLLBACK;');
-            return res.status(404).json({ message: 'Bill not found.' });
-          }
-
-          const finish = () => db.run('COMMIT;', (err) => {
-            if (err) return next(err);
-            console.log(`Bill ${billId} deleted; ${taskIds.length} tasks un-billed.`);
-            res.json({ message: 'Bill deleted successfully.', billId, tasksUnbilled: taskIds.length });
-          });
-
-          // Payments it covered go back to unbilled (their tasks are un-billed below)
-          db.run(`UPDATE TaskInstallments SET billId = NULL WHERE billId = ?`, [billId], (err) => {
-            if (err) { db.run('ROLLBACK;'); return next(err); }
-            if (taskIds.length === 0) return finish();
-            db.run(`UPDATE Tasks SET beenBilled = 0 WHERE id IN (${taskIds.map(() => '?').join(',')})`, taskIds, (err) => {
-              if (err) { db.run('ROLLBACK;'); return next(err); }
-              finish();
-            });
-          });
-        });
-      });
-    });
-  });
+    console.log(`Bill ${billId} deleted; ${taskIds.length} tasks un-billed.`);
+    res.json({ message: 'Bill deleted successfully.', billId, tasksUnbilled: taskIds.length });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // POST /api/projects/test - Create a test project with billable tasks

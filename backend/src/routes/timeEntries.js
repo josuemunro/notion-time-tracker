@@ -39,6 +39,7 @@ const ENTRY_SELECT = `
     te.startTime,
     te.endTime,
     te.duration,
+    te.billId,
     t.id AS taskId,
     t.name AS taskName,
     t.notionId AS taskNotionId,
@@ -64,7 +65,8 @@ const ENTRY_SELECT = `
 /**
  * Write the interval [startIso, endIso) for an existing row, splitting at local
  * midnights: the row itself becomes the first segment and one extra row is
- * inserted per following day. Returns every row written, in order.
+ * inserted per following day. Returns every row written, in order. Extra rows
+ * inherit the entry's billId, so a billed entry stays billed when split.
  * Caller owns the transaction.
  */
 async function writeInterval(db, entry, startIso, endIso, timeZone) {
@@ -74,8 +76,8 @@ async function writeInterval(db, entry, startIso, endIso, timeZone) {
   const written = [{ timeEntryId: entry.id, ...first }];
   for (const seg of rest) {
     const result = await dbRun(db,
-      'INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration) VALUES (?, ?, ?, ?, ?)',
-      [entry.taskId, entry.notionTaskId, seg.startTime, seg.endTime, seg.duration]);
+      'INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration, billId) VALUES (?, ?, ?, ?, ?, ?)',
+      [entry.taskId, entry.notionTaskId, seg.startTime, seg.endTime, seg.duration, entry.billId ?? null]);
     written.push({ timeEntryId: result.lastID, ...seg });
   }
   return written;
@@ -135,10 +137,11 @@ router.post('/start', async (req, res, next) => {
   }
 });
 
-// POST /api/time-entries - Create a manual time entry (one row per calendar day it covers)
+// POST /api/time-entries - Create a manual time entry (one row per calendar day it covers).
+// Optional billId restores a deleted entry's billed state (undo); omit it for new time.
 router.post('/', async (req, res, next) => {
   const db = database.getDb();
-  const { taskId, startTime, endTime } = req.body;
+  const { taskId, startTime, endTime, billId = null } = req.body;
 
   if (!taskId || !startTime || !endTime) {
     return res.status(400).json({ message: 'taskId, startTime, and endTime are required.' });
@@ -149,19 +152,26 @@ router.post('/', async (req, res, next) => {
   if (new Date(endTime) < new Date(startTime)) {
     return res.status(400).json({ message: 'endTime must not be before startTime.' });
   }
+  if (billId !== null && !Number.isInteger(billId)) {
+    return res.status(400).json({ message: 'billId must be a bill id or null.' });
+  }
 
   try {
     const timeZone = await settings.getTimeZone();
     const task = await dbGet(db, 'SELECT notionId FROM Tasks WHERE id = ?', [taskId]);
     if (!task) return res.status(404).json({ message: 'Task not found.' });
+    // 0 = billed before per-entry tracking (see database.js); anything else must be a real bill
+    if (billId && !(await dbGet(db, 'SELECT id FROM Bills WHERE id = ?', [billId]))) {
+      return res.status(400).json({ message: 'That bill no longer exists.' });
+    }
 
     const segments = splitAtLocalMidnights(toIso(startTime), toIso(endTime), timeZone);
     const entries = await withTransaction(db, async () => {
       const written = [];
       for (const seg of segments) {
         const result = await dbRun(db,
-          'INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration) VALUES (?, ?, ?, ?, ?)',
-          [taskId, task.notionId, seg.startTime, seg.endTime, seg.duration]);
+          'INSERT INTO TimeEntries (taskId, notionTaskId, startTime, endTime, duration, billId) VALUES (?, ?, ?, ?, ?, ?)',
+          [taskId, task.notionId, seg.startTime, seg.endTime, seg.duration, billId]);
         written.push({ timeEntryId: result.lastID, ...seg });
       }
       return written;
@@ -275,7 +285,7 @@ router.put('/:timeEntryId', async (req, res, next) => {
 
   try {
     const timeZone = await settings.getTimeZone();
-    const entry = await dbGet(db, 'SELECT id, taskId, notionTaskId FROM TimeEntries WHERE id = ?', [timeEntryId]);
+    const entry = await dbGet(db, 'SELECT id, taskId, notionTaskId, billId FROM TimeEntries WHERE id = ?', [timeEntryId]);
     if (!entry) return res.status(404).json({ message: 'Time entry not found.' });
 
     const entries = await withTransaction(db, () => writeInterval(db, entry, toIso(startTime), toIso(endTime), timeZone));

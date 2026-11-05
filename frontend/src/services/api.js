@@ -61,8 +61,6 @@ export const getProjects = () => apiClient.get('/projects');
 export const getActiveProjects = () => apiClient.get('/projects/active');
 export const getProjectDetails = (projectId) => apiClient.get(`/projects/${projectId}`);
 export const updateProject = (projectId, projectData) => apiClient.put(`/projects/${projectId}`, projectData);
-export const updateTasksBillingStatus = (projectId, taskIds, beenBilled) =>
-  apiClient.put(`/projects/${projectId}/tasks/billing`, { taskIds, beenBilled });
 export const createTestProject = () => apiClient.post('/projects/test');
 
 // Bills — taskIds for whole tasks, installmentIds for payments of split fixed-price tasks

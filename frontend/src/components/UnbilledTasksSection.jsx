@@ -129,6 +129,10 @@ function UnbilledTasksSection({ project, onTasksBilled, onRefresh }) {
                         <p className="font-semibold text-gray-800">
                           {item.kind === 'installment' ? formatNZD(item.amount) : formatHoursHuman(item.totalHoursSpent || 0)}
                         </p>
+                        {/* Part-billed hourly task: only the time since its last bill is here */}
+                        {item.kind === 'task' && item.fixedPrice == null && item.taskTotalHours - item.hours > 1 / 60 && (
+                          <p className="text-xs text-gray-500">of {formatHoursHuman(item.taskTotalHours)} logged</p>
+                        )}
                         {item.kind === 'task' && <p className="text-sm text-gray-600">{formatNZD(item.amount)}</p>}
                       </div>
                     </div>

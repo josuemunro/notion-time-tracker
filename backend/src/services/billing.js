@@ -3,23 +3,31 @@
 // the client in frontend/src/utils/billingUtils.js — the server is the source
 // of truth for stored bills.
 //
-// What's unbilled: billable tasks that haven't been billed. A task becomes one
-// or more "billing items":
+// What's unbilled becomes "billing items":
+//   - an hourly task → its time entries not yet on a bill (TimeEntries.billId
+//     NULL). Billing covers the hours so far; time logged later is unbilled again.
 //   - a fixed-price task split into payments → one item per unbilled payment
-//   - any other fixed-price task → one item for the full price
-//   - an hourly task with logged time → one item for its hours
+//   - any other fixed-price task not yet billed (beenBilled) → its full price
 //
 // When an item should be invoiced (its `sendBy` date, display-zone YYYY-MM-DD):
 //   1. an explicit date wins — the payment's due date, or the task's invoiceDate
-//   2. otherwise the work must be finished (task status Done) — until then the
-//      item is "waiting" (invoice when done)
-//   3. finished work follows the project: the next monthly pay-run cutoff
-//      (invoiceDayOfMonth) or, without one, as soon as possible (today)
+//      (a task's date is used up when it's billed)
+//   2. hourly work in a pay-run project is due on the next pay-run cutoff,
+//      finished or not — that's the point of billing monthly
+//   3. anything else must be finished (task status Done) — until then it's
+//      "waiting" (invoice when done)
+//   4. finished work follows the project: the next pay-run cutoff, or today
+//
+// One invoice per pay run: once a project has been billed for time in the
+// PAY_RUN_WINDOW_DAYS before a cutoff, new work rolls to the following cutoff.
 const { dbAll } = require('../database');
 const settings = require('../settings');
 const { localDateString, addDays } = require('../utils/time');
 
 const GST_RATE = 0.15;
+const PAY_RUN_WINDOW_DAYS = 14;
+// Unbilled hourly time below this is ignored (a timer started by accident shouldn't nag)
+const MIN_UNBILLED_SECONDS = 60;
 
 // Round hours up to the nearest 0.25 (15 min) for billing
 const roundToQuarterHour = (hours) => Math.ceil(hours * 4) / 4;
@@ -68,15 +76,31 @@ function nextPayRunDate(today, dayOfMonth) {
   return `${ny}-${pad(nm)}-${pad(Math.min(dayOfMonth, daysInMonth(ny, nm)))}`;
 }
 
+/**
+ * The pay-run cutoff new work should go to. Normally the next cutoff, but if the
+ * project was already billed for time in the run-up to it, that run is done and
+ * work rolls to the one after.
+ */
+function payRunDate(project, today) {
+  const next = nextPayRunDate(today, project.invoiceDayOfMonth);
+  const billed = project.lastTimeBillDate;
+  if (billed && billed <= next && billed >= addDays(next, -PAY_RUN_WINDOW_DAYS)) {
+    return { sendBy: nextPayRunDate(addDays(next, 1), project.invoiceDayOfMonth), rolled: true };
+  }
+  return { sendBy: next, rolled: false };
+}
+
 /** When an item should be invoiced, and why. See the rules at the top of the file. */
 function itemTiming(item, project, today) {
   if (item.explicitDate) {
     return { sendBy: item.explicitDate, timing: item.kind === 'installment' ? 'scheduled' : 'task-date' };
   }
-  if (!isDone(item.status)) return { sendBy: null, timing: 'on-completion' };
-  if (project.invoiceDayOfMonth) {
-    return { sendBy: nextPayRunDate(today, project.invoiceDayOfMonth), timing: 'pay-run' };
+  const isHourly = item.kind === 'task' && item.fixedPrice == null;
+  if (project.invoiceDayOfMonth && (isHourly || isDone(item.status))) {
+    const { sendBy, rolled } = payRunDate(project, today);
+    return { sendBy, timing: rolled ? 'next-pay-run' : 'pay-run' };
   }
+  if (!isDone(item.status)) return { sendBy: null, timing: 'on-completion' };
   return { sendBy: today, timing: 'asap' };
 }
 
@@ -89,8 +113,10 @@ function expectedPaymentDate(sendBy, project, today) {
   return addDays(sendBy < today ? today : sendBy, project.paymentTermsDays);
 }
 
-// Something to bill: a fixed price is owed regardless of hours; hourly work needs logged time
-const hasBillableValue = (task) => task.fixedPrice != null || task.hours > 0;
+// Something to bill: an unbilled fixed price (hours don't matter), or unbilled hourly time
+const hasBillableValue = (task) => (task.fixedPrice != null
+  ? !task.beenBilled
+  : task.unbilledHours * 3600 >= MIN_UNBILLED_SECONDS);
 
 /**
  * Billing items for one project's unbilled tasks.
@@ -113,9 +139,13 @@ function buildBillingItems(project, tasks, installmentsByTask, today) {
   };
 
   for (const task of tasks) {
-    const base = { taskId: task.id, name: task.name, status: task.status, isManual: !!task.isManual };
+    const base = {
+      taskId: task.id, name: task.name, status: task.status, isManual: !!task.isManual,
+      taskTotalHours: task.hours, // everything logged, billed or not
+    };
     const installments = installmentsByTask.get(task.id) || [];
     if (installments.length > 0) {
+      if (task.beenBilled) continue;
       installments.forEach((inst, index) => {
         if (inst.billId != null) return;
         push({
@@ -135,6 +165,8 @@ function buildBillingItems(project, tasks, installmentsByTask, today) {
       });
     } else if (hasBillableValue(task)) {
       const rate = task.hourlyRateOverride != null ? task.hourlyRateOverride : (project.hourlyRate || 0);
+      // Hourly: only time not yet on a bill. Fixed: hours are informational.
+      const hours = task.fixedPrice != null ? task.hours : task.unbilledHours;
       push({
         ...base,
         key: `t${task.id}`,
@@ -143,8 +175,8 @@ function buildBillingItems(project, tasks, installmentsByTask, today) {
         label: null,
         fixedPrice: task.fixedPrice,
         hourlyRateOverride: task.hourlyRateOverride,
-        hours: task.hours,
-        amount: task.fixedPrice != null ? task.fixedPrice : task.hours * rate,
+        hours,
+        amount: task.fixedPrice != null ? task.fixedPrice : hours * rate,
         explicitDate: task.invoiceDate,
       });
     }
@@ -153,22 +185,38 @@ function buildBillingItems(project, tasks, installmentsByTask, today) {
 }
 
 /**
- * Billable tasks that haven't been billed, with their logged hours.
- * Same rule as the project page always used (isBillable && !beenBilled),
- * evaluated in JS so legacy boolean encodings behave identically.
+ * Billable tasks with their logged hours (`hours`) and the part of it not yet on
+ * a bill (`unbilledHours`, finished entries only — a running timer joins once
+ * stopped). Whether there's anything to bill is decided per item. isBillable is
+ * checked in JS so legacy boolean encodings behave like they do in the UI.
  */
 async function getUnbilledTasks(projectId = null) {
   const rows = await dbAll(`
     SELECT t.id, t.projectId, t.name, t.status, t.isManual, t.isBillable, t.beenBilled,
            t.fixedPrice, t.hourlyRateOverride, t.invoiceDate,
-           COALESCE(SUM(te.duration), 0) / 3600.0 AS hours
+           COALESCE(SUM(te.duration), 0) / 3600.0 AS hours,
+           COALESCE(SUM(CASE WHEN te.billId IS NULL THEN te.duration END), 0) / 3600.0 AS unbilledHours
     FROM Tasks t
     LEFT JOIN TimeEntries te ON te.taskId = t.id AND te.endTime IS NOT NULL
     WHERE t.projectId IS NOT NULL ${projectId != null ? 'AND t.projectId = ?' : ''}
     GROUP BY t.id
     ORDER BY t.name COLLATE NOCASE
   `, projectId != null ? [projectId] : []);
-  return rows.filter(t => t.isBillable && !t.beenBilled);
+  return rows.filter(t => t.isBillable);
+}
+
+/**
+ * Local date of each project's latest bill that billed time (not just payments
+ * of a split) — the pay-run "already invoiced this run" check.
+ */
+async function getLastTimeBillDates(timeZone) {
+  const rows = await dbAll(`
+    SELECT b.projectId, MAX(b.createdAt) AS lastBilledAt
+    FROM Bills b
+    WHERE EXISTS (SELECT 1 FROM BillTasks bt WHERE bt.billId = b.id AND bt.installmentId IS NULL)
+    GROUP BY b.projectId
+  `);
+  return new Map(rows.map(r => [r.projectId, localDateString(new Date(r.lastBilledAt), timeZone)]));
 }
 
 /** Installments for the given task ids, grouped by task, in payment order. */
@@ -186,17 +234,15 @@ async function getInstallmentsByTask(taskIds) {
   return byTask;
 }
 
-async function getToday() {
-  return localDateString(new Date(), await settings.getTimeZone());
-}
 
 /**
  * Every project's unbilled billing items: { today, projects: [{ project, items }] }.
  * Pass projectId to limit it to one project.
  */
 async function loadUnbilledItems(projectId = null) {
-  const [today, tasks, projects] = await Promise.all([
-    getToday(),
+  const timeZone = await settings.getTimeZone();
+  const today = localDateString(new Date(), timeZone);
+  const [tasks, projects, lastTimeBillDates] = await Promise.all([
     getUnbilledTasks(projectId),
     dbAll(`
       SELECT p.id, p.name, p.status, p.hourlyRate, p.color, p.iconType, p.iconValue,
@@ -205,7 +251,9 @@ async function loadUnbilledItems(projectId = null) {
       ${projectId != null ? 'WHERE p.id = ?' : ''}
       ORDER BY p.name COLLATE NOCASE
     `, projectId != null ? [projectId] : []),
+    getLastTimeBillDates(timeZone),
   ]);
+  for (const project of projects) project.lastTimeBillDate = lastTimeBillDates.get(project.id) || null;
   const installmentsByTask = await getInstallmentsByTask(tasks.map(t => t.id));
   const tasksByProject = new Map();
   for (const task of tasks) {
@@ -225,6 +273,15 @@ async function loadUnbilledItems(projectId = null) {
 async function getProjectBillingItems(projectId) {
   const { projects } = await loadUnbilledItems(projectId);
   return projects[0]?.items || [];
+}
+
+/** What's been billed for a project so far: { subtotal (ex GST), hours, billCount }. */
+async function getBilledTotals(projectId) {
+  const [row] = await dbAll(
+    'SELECT COALESCE(SUM(subtotal), 0) AS subtotal, COALESCE(SUM(totalHours), 0) AS hours, COUNT(*) AS billCount FROM Bills WHERE projectId = ?',
+    [projectId]
+  );
+  return row;
 }
 
 /**
@@ -327,6 +384,7 @@ module.exports = {
   getUnbilledTasks,
   getInstallmentsByTask,
   getProjectBillingItems,
+  getBilledTotals,
   getUnbilledSummaries,
   getBillingSchedule,
 };

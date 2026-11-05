@@ -31,6 +31,7 @@ export const timingReason = (timing, invoiceDayOfMonth) => {
   switch (timing) {
     case 'asap': return 'work is done';
     case 'pay-run': return invoiceDayOfMonth ? `pay run (by the ${ordinal(invoiceDayOfMonth)})` : 'pay run';
+    case 'next-pay-run': return 'next pay run (this one is already invoiced)';
     case 'task-date': return 'task invoice date';
     case 'scheduled': return 'payment schedule';
     case 'on-completion': return 'invoice when done';

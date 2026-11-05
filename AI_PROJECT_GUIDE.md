@@ -188,10 +188,9 @@ The client (`TimerContext`) calls `rollover` from its 1-second tick when the loc
 |--------|------|-------------|
 | GET | `/api/projects` | All projects with time, client info and unbilled summary (`unbilledAmount` ex GST, `unbilledHours`, `unbilledTaskCount`, `readyAmount`, `lastBilledAt`) |
 | GET | `/api/projects/active` | Same, for status Proposal/In progress/Ongoing |
-| GET | `/api/projects/:id` | Project detail + tasks (with `invoiceDate`, `installments[]`) + `billingItems[]` (what's unbilled and when to invoice it) |
+| GET | `/api/projects/:id` | Project detail + tasks (with `invoiceDate`, `unbilledHours`, `installments[]`) + `billingItems[]` (what's unbilled and when to invoice it) + `billedTotals` |
 | PUT | `/api/projects/:id` | Update any of `color` (hex), `hourlyRate`, `invoiceDayOfMonth` (1–31 or null), `paymentTermsDays` (0–365 or null) |
-| PUT | `/api/projects/:id/tasks/billing` | Bulk set `beenBilled` for `taskIds[]` |
-| POST | `/api/projects/:id/bills` | Create bill snapshot from `taskIds[]` and/or `installmentIds[]` (payments of split tasks); computes hours/GST server-side, marks them billed |
+| POST | `/api/projects/:id/bills` | Create bill snapshot from `taskIds[]` (hourly: their unbilled entries; fixed: the price) and/or `installmentIds[]` (payments of split tasks); computes hours/GST server-side, marks entries/tasks/payments billed. 409 if a task has nothing left to bill |
 | GET | `/api/projects/:id/bills` | List bills (newest first) with task snapshots |
 | DELETE | `/api/projects/:id/bills/:billId` | Delete bill + un-bill its tasks and payments (undo) |
 | POST | `/api/projects/test` | Create test project + sample tasks |
@@ -216,7 +215,7 @@ The client (`TimerContext`) calls `rollover` from its 1-second tick when the loc
 | POST | `/api/time-entries/start` | Start timer. Body: `{ taskId }` |
 | POST | `/api/time-entries/:id/stop` | Stop timer. Splits at local midnight; response has `entries[]`, `split` |
 | POST | `/api/time-entries/:id/rollover` | Running timer crossed midnight → close at midnight + new entry. `{ rolled, timeEntryId, startTime }` |
-| POST | `/api/time-entries` | Manual entry. Body: `{ taskId, startTime, endTime }` (UTC ISO). Splits at midnight |
+| POST | `/api/time-entries` | Manual entry. Body: `{ taskId, startTime, endTime, billId? }` (UTC ISO; `billId` restores a deleted entry's billed state on undo). Splits at midnight |
 | PUT | `/api/time-entries/:id` | Update entry times. Splits at midnight (extra rows inserted) |
 | DELETE | `/api/time-entries/:id` | Delete entry |
 | GET | `/api/time-entries` | List. Query: `?date=`, `?startDate=`, `?endDate=` (YYYY-MM-DD, local days in the configured timezone). Rows include `localDate` |
@@ -257,13 +256,15 @@ The client (`TimerContext`) calls `rollover` from its 1-second tick when the loc
 Clients (id, notionId, name, status)
   └── Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color, invoiceDayOfMonth, paymentTermsDays)
         ├── Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage, isManual, fixedPrice, hourlyRateOverride, invoiceDate)
-        │     ├── TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
+        │     ├── TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion, billId)
         │     └── TaskInstallments (id, taskId, label, amount, dueDate, billId, sortOrder)
         └── Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt)
-              └── BillTasks (id, billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId)
+              └── BillTasks (id, billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId, taskInvoiceDate)
 ```
 
-`Bills`/`BillTasks` are snapshots frozen at billing time — task names and hours are copied in so bill history survives task renames and deletions. Deleting a bill resets `beenBilled` on its tasks and releases its payments (`TaskInstallments.billId = NULL`).
+`Bills`/`BillTasks` are snapshots frozen at billing time — task names and hours are copied in so bill history survives task renames and deletions. Deleting a bill releases its time entries and payments (`billId = NULL`), restores invoice dates it used up, and recomputes `beenBilled`.
+
+Hourly work is billed **per time entry**: `TimeEntries.billId` is the bill that covered it (NULL = unbilled, 0 = billed before per-entry tracking, set by the one-time `migration:entryBilling`). A bill line's `hoursSpent` is the unbilled time it covered, so a long-running task can be billed every month. `Tasks.beenBilled` now only means "the fixed price has been billed".
 
 `TaskInstallments` is a fixed-price task's payment split (local-only). Amounts add up to the task's `fixedPrice`; `dueDate` NULL means "when the task is done". Each payment is billed on its own; the task's `beenBilled` flips once every payment has a `billId`. `budgetedTime` is still synced from Notion but no longer shown anywhere.
 
@@ -310,7 +311,7 @@ The Notion integration expects these exact property names:
 5. **Auth**: Single password (`APP_PASSWORD`). Login issues stateless HMAC-signed tokens (secret derived from `APP_PASSWORD`, 30-day expiry) verified in `app.js` — no server-side session state, so sessions survive restarts, redeploys, and Railway App Sleeping. Changing `APP_PASSWORD` invalidates all tokens. No password set = auth disabled (local dev).
 6. **No auto-sync**: Sync is manual to avoid Notion rate limits.
 7. **Statelessness matters**: Railway App Sleeping stops the process when idle, so never keep durable state only in backend memory — persist to SQLite on `/data` or make it derivable (like the auth tokens).
-8. **When to invoice** (`services/billing.js`): unbilled work becomes billing items — one per hourly task with time, per unsplit fixed-price task, or per unbilled payment of a split one. An explicit date wins (payment `dueDate`, task `invoiceDate`). Otherwise the task must be Done (until then it's "waiting"); finished work is due on the next pay-run cutoff if the project has `invoiceDayOfMonth` (clamped to short months), else today. `paymentTermsDays` adds an expected payment date. Billing is still whole-task: billing an unfinished hourly task bills its hours so far and later hours on it won't show as unbilled — which is why unfinished work waits by default.
+8. **When to invoice** (`services/billing.js`): unbilled work becomes billing items — an hourly task's time entries not yet on a bill (`TimeEntries.billId` NULL; billing marks them, so time logged later is unbilled again), an unbilled fixed price (`beenBilled` = the fixed price has been billed), or each unbilled payment of a split one. An explicit date wins (payment `dueDate`, task `invoiceDate` — billing the task uses its date up; undo restores it). Hourly work in a pay-run project (`invoiceDayOfMonth`, clamped to short months) is due on the next cutoff, finished or not; everything else waits until the task is `Done`, then follows the pay run or is due today. One invoice per run: if the project was billed for time in the 14 days before the cutoff, new work rolls to the next one. `paymentTermsDays` gives an expected payment date.
 
 ---
 

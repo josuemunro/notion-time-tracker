@@ -118,6 +118,30 @@ async function runDataMigrations() {
     const result = await dbRun('UPDATE Tasks SET isBillable = 1 WHERE isManual = 1 AND NOT COALESCE(isBillable, 0)');
     if (result.changes) console.log(`Migration: marked ${result.changes} local tasks as billable.`);
   });
+
+  // Billing moved from whole tasks to time entries. Everything already logged on a
+  // task marked billed counts as billed (conservative: nothing old resurfaces as
+  // owed), pointing at the task's latest bill so deleting that bill releases it.
+  // Pre-bill-history billing has no bill to point at → 0.
+  await runOnce('migration:entryBilling', async () => {
+    const tasks = (await dbAll('SELECT id, beenBilled FROM Tasks')).filter(t => t.beenBilled);
+    if (tasks.length > 0) {
+      const snapshot = await snapshotDatabase('pre-entry-billing-migration');
+      console.log('Entry billing migration: pre-migration snapshot written to', snapshot);
+    }
+    let marked = 0;
+    for (const task of tasks) {
+      const bill = await dbGet(
+        'SELECT MAX(billId) AS billId FROM BillTasks WHERE taskId = ? AND installmentId IS NULL', [task.id]);
+      const result = await dbRun(
+        'UPDATE TimeEntries SET billId = ? WHERE taskId = ? AND endTime IS NOT NULL AND billId IS NULL',
+        [bill?.billId ?? 0, task.id]);
+      marked += result.changes;
+    }
+    // beenBilled now only means "the fixed price has been billed" — hourly tasks are tracked per entry
+    await dbRun('UPDATE Tasks SET beenBilled = 0 WHERE fixedPrice IS NULL');
+    console.log(`Migration: marked ${marked} time entries on ${tasks.length} billed tasks as billed.`);
+  });
 }
 
 function connect() {
@@ -242,6 +266,10 @@ function init() {
         `, (err) => {
           if (err) return reject(err);
           console.log('TimeEntries table created or already exists.');
+          // Which bill covered this entry: NULL = unbilled, 0 = billed before per-entry
+          // tracking existed (no bill to point at). Hourly work is billed per entry, so
+          // time logged after a bill shows up as unbilled again.
+          db.run(`ALTER TABLE TimeEntries ADD COLUMN billId INTEGER`, () => { });
         });
 
         // Bills Table — snapshot of a bill at creation time (task hours/financials frozen)
@@ -284,6 +312,7 @@ function init() {
           db.run(`ALTER TABLE BillTasks ADD COLUMN fixedPrice REAL`, () => { });
           db.run(`ALTER TABLE BillTasks ADD COLUMN rate REAL`, () => { });
           db.run(`ALTER TABLE BillTasks ADD COLUMN installmentId INTEGER`, () => { }); // set when the line is a payment of a split
+          db.run(`ALTER TABLE BillTasks ADD COLUMN taskInvoiceDate TEXT`, () => { }); // task's invoiceDate before billing used it up (restored on undo)
         });
 
         // TaskInstallments — a fixed-price task's billing split. Amounts add up to the

@@ -232,7 +232,7 @@ function TaskPricingModal({ task, project, onClose, onSaved }) {
                   </div>
                   <p className="text-xs text-gray-500">
                     {invoiceDate
-                      ? `Shows up to bill on ${shortDate(invoiceDate)}, whether or not the task is done.`
+                      ? `Shows up to bill on ${shortDate(invoiceDate)}, whether or not the task is done. Billing the task clears the date.`
                       : `Blank follows ${projectDefault}.`}
                   </p>
                 </div>

@@ -397,8 +397,8 @@ function ProjectDetailPage() {
             </div>
             <p className="text-xs text-gray-500">
               {isPayRun
-                ? `Finished work is due on the next ${project.invoiceDayOfMonth ? ordinal(project.invoiceDayOfMonth) : 'cutoff'} (short months use their last day).`
-                : 'Finished work is due straight away. The payment time estimates when the money arrives.'}
+                ? `Hours logged so far are due on the next ${project.invoiceDayOfMonth ? ordinal(project.invoiceDayOfMonth) : 'cutoff'}, finished or not (short months use their last day); fixed prices wait until the task is done. Once billed in the two weeks before a cutoff, new work rolls to the next one.`
+                : 'Finished work is due straight away; unfinished work waits until it\'s done. The payment time estimates when the money arrives.'}
               {' '}Tasks can set their own invoice date or payment split from their $ button.
             </p>
           </div>

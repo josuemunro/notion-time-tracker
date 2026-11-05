@@ -216,7 +216,8 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
             taskId: entry.taskId,
             startTime: entry.startTime,
             endTime: entry.endTime,
-            duration: entry.duration
+            duration: entry.duration,
+            billId: entry.billId ?? null // billed time stays billed
           });
           fetchTimeEntries();
           onEntriesChanged?.();

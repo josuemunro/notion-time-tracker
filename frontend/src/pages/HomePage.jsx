@@ -187,7 +187,8 @@ function HomePage() {
       setTimelineRefresh(n => n + 1);
       showUndo(`Deleted ${entry.taskName} (${formatDurationHuman(entry.duration)})`, async () => {
         try {
-          await addManualTimeEntry({ taskId: entry.taskId, startTime: entry.startTime, endTime: entry.endTime });
+          // billId keeps billed time billed (the entry comes back with a new id)
+          await addManualTimeEntry({ taskId: entry.taskId, startTime: entry.startTime, endTime: entry.endTime, billId: entry.billId ?? null });
           fetchDayEntries();
           setTimelineRefresh(n => n + 1);
         } catch (err) {

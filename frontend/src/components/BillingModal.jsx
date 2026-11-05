@@ -117,6 +117,9 @@ function BillingModal({ project, items, onClose, onCompleted }) {
                     {item.kind === 'task' && (
                       <p className="text-sm text-gray-600">
                         {(item.totalHoursSpent || 0).toFixed(2)}h decimal
+                        {item.fixedPrice == null && item.taskTotalHours - item.hours > 1 / 60 && (
+                          <span className="block text-xs text-gray-500">unbilled, of {formatHoursHuman(item.taskTotalHours)} logged</span>
+                        )}
                       </p>
                     )}
                   </div>

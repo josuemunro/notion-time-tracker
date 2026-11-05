@@ -1,26 +1,24 @@
 import React from 'react';
 import { formatHoursHuman } from '../utils/timeUtils';
-import { taskBillAmount, computeBillTotals, formatNZD } from '../utils/billingUtils';
+import { computeBillTotals, formatNZD } from '../utils/billingUtils';
 
 function BillingOverview({ project, tasks }) {
   if (!project || !tasks) return null;
 
-  // Calculate billing totals (taskBillAmount respects fixed prices + rate overrides)
-  const billedTasks = tasks.filter(task => task.isBillable && task.beenBilled);
-  const unbilledTasks = tasks.filter(task => task.isBillable && !task.beenBilled);
+  // Billed: what the project's bills actually charged (ex GST), from the server.
+  // Billing is per time entry, so a task can be part billed, part waiting.
+  const billed = project.billedTotals || { subtotal: 0, hours: 0, billCount: 0 };
+  const totalBilledAmount = billed.subtotal;
+  const totalBilledTime = billed.hours;
+
+  // Waiting: what billing everything outstanding would come to (bill rounding,
+  // ex GST) — the server's billing items, matching the projects page and Unbilled list
+  const items = project.billingItems || [];
+  const totalUnbilledAmount = computeBillTotals(items, project.hourlyRate).subtotal;
+  const totalUnbilledTime = items.filter(i => i.fixedPrice == null).reduce((sum, i) => sum + (i.hours || 0), 0);
+
   const unbillableTasks = tasks.filter(task => !task.isBillable);
-
-  const totalBilledTime = billedTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
-  const totalUnbilledTime = unbilledTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
   const totalUnbillableTime = unbillableTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
-
-  // Split fixed-price tasks count their already-invoiced payments as billed
-  const billedPayments = unbilledTasks.reduce((sum, task) =>
-    sum + (task.installments || []).filter(i => i.billId != null).reduce((s, i) => s + i.amount, 0), 0);
-  const totalBilledAmount = billedTasks.reduce((sum, task) => sum + taskBillAmount(task, project.hourlyRate), 0) + billedPayments;
-  // What billing everything outstanding would come to (bill rounding, ex GST) — the
-  // server's billing items, so it matches the projects page and the Unbilled list
-  const totalUnbilledAmount = computeBillTotals(project.billingItems || [], project.hourlyRate).subtotal;
 
   const formatCurrency = formatNZD;
 
@@ -38,7 +36,7 @@ function BillingOverview({ project, tasks }) {
             {formatCurrency(totalBilledAmount)}
           </p>
           <p className="text-sm text-green-600 mt-1">
-            {formatHoursHuman(totalBilledTime)}
+            {billed.billCount} bill{billed.billCount !== 1 ? 's' : ''} · {formatHoursHuman(totalBilledTime)} · ex GST
           </p>
         </div>
 

@@ -6,7 +6,7 @@ import { useTimer } from '../contexts/TimerContext';
 import { useSyncComplete } from '../utils/syncEvents';
 import { formatNZD } from '../utils/billingUtils';
 import { formatHoursHuman } from '../utils/timeUtils';
-import { sendByLabel, shortDate, timingReason, ordinal, TONE_CLASSES } from '../utils/billingSchedule';
+import { sendByLabel, shortDate, timingReason, TONE_CLASSES } from '../utils/billingSchedule';
 import ProjectIcon from './ProjectIcon';
 import BillingModal from './BillingModal';
 
@@ -180,9 +180,9 @@ function BillingSchedule({ refreshToken = 0 }) {
               {showWaiting && (
                 <>
                   <p className="text-xs text-gray-500">
-                    Unfinished work is invoiced once it's done, at the project's pay run
-                    {waiting.some(g => g.invoiceDayOfMonth) ? ` (e.g. by the ${ordinal(waiting.find(g => g.invoiceDayOfMonth).invoiceDayOfMonth)})` : ''} or
-                    straight away. Give a task an invoice date to bill it sooner.
+                    Unfinished work in projects without a pay run, and fixed prices, are invoiced once
+                    the task is done. Give a task an invoice date to bill it sooner, or put the project
+                    on a monthly pay run to bill hours as they're logged.
                   </p>
                   {waiting.map(renderGroup)}
                 </>
