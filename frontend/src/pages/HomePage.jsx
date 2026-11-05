@@ -4,6 +4,7 @@ import { useTimer } from '../contexts/TimerContext';
 import { useToast } from '../contexts/ToastContext';
 import { getTasksInProgress, getTimeEntries, updateTaskStatus, deleteTimeEntry, addManualTimeEntry } from '../services/api';
 import { useSettings } from '../contexts/SettingsContext';
+import { useSyncComplete } from '../utils/syncEvents';
 import TaskItem from '../components/common/TaskItem';
 import TimelineView from '../components/TimelineView';
 import MoneyTimer from '../components/MoneyTimer';
@@ -77,8 +78,9 @@ function HomePage() {
     setSelectedDate(todayDate);
   };
 
-  const fetchInProgress = async () => {
-    setIsLoadingTasks(true);
+  // quiet: refetch in place (no spinner swap), e.g. after a Notion sync
+  const fetchInProgress = async ({ quiet = false } = {}) => {
+    if (!quiet) setIsLoadingTasks(true);
     setErrorTasks(null);
     try {
       const { data } = await getTasksInProgress();
@@ -140,6 +142,13 @@ function HomePage() {
 
   // Timer start/stop/midnight-rollover changes the day's entries
   useEffect(() => registerTimerChangeCallback(fetchDayEntries), [registerTimerChangeCallback, selectedDate]);
+
+  // A Notion sync can add/rename/complete tasks — refresh everything task-shaped
+  useSyncComplete(() => {
+    fetchInProgress({ quiet: true });
+    fetchDayEntries();
+    setTimelineRefresh(n => n + 1);
+  });
 
   const handleQuickStart = (taskId, taskName, projectName) => {
     startTimer(taskId, taskName, projectName);

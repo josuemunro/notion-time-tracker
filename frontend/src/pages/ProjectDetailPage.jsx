@@ -11,6 +11,7 @@ import { ArrowPathIcon, ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/sol
 import EmptyState from '../components/common/EmptyState';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { useTimer } from '../contexts/TimerContext'; // Import useTimer
+import { useSyncComplete } from '../utils/syncEvents';
 
 function ProjectDetailPage() {
   const { projectId } = useParams();
@@ -63,6 +64,9 @@ function ProjectDetailPage() {
   useEffect(() => {
     fetchProject();
   }, [projectId]);
+
+  // Notion sync can rename/complete tasks; keep any half-typed setting inputs
+  useSyncComplete(() => fetchProject(true));
 
   // Refresh project data if the active timer changes (e.g. time logged might update)
   // Use useRef to track previous state and avoid fetchProject dependency

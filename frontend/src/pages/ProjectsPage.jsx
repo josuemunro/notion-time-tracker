@@ -5,6 +5,7 @@ import { ArrowPathIcon, BriefcaseIcon } from '@heroicons/react/24/solid';
 import { formatHoursHuman } from '../utils/timeUtils';
 import ProjectIcon from '../components/ProjectIcon';
 import EmptyState from '../components/common/EmptyState';
+import { useSyncComplete } from '../utils/syncEvents';
 
 // Shared status-chip colors (kept in sync with ClientDetailPage)
 const statusChipClass = (status) => {
@@ -78,6 +79,8 @@ function ProjectsPage() {
       setIsLoading(false);
     }
   };
+
+  useSyncComplete(fetchProjects);
 
   useEffect(() => {
     fetchProjects();

@@ -3,6 +3,7 @@ import { getTasks } from '../services/api';
 import TaskItem from '../components/common/TaskItem';
 import { ArrowPathIcon, ListBulletIcon } from '@heroicons/react/24/solid';
 import EmptyState from '../components/common/EmptyState';
+import { useSyncComplete } from '../utils/syncEvents';
 
 
 function TasksPage() {
@@ -26,6 +27,8 @@ function TasksPage() {
             setIsLoading(false);
         }
     };
+
+    useSyncComplete(fetchTasks);
 
     useEffect(() => {
         fetchTasks();

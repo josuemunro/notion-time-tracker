@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { syncNotion } from '../../services/api'; // Import syncNotion
 import { useTimer } from '../../contexts/TimerContext'; // To refresh timer if needed
+import { notifySyncComplete } from '../../utils/syncEvents';
 import { ArrowPathIcon, Cog6ToothIcon } from '@heroicons/react/24/solid';
 
 
@@ -20,7 +21,7 @@ function Navbar() {
       await syncNotion();
       setSyncMessage('Sync successful!');
       refreshActiveTimer(); // Refresh active timer state as sync might affect task IDs/status
-      // Consider a way to notify other components to refresh their data, e.g., via a shared context/event
+      notifySyncComplete(); // Pages showing synced data refetch (see utils/syncEvents)
       setTimeout(() => setSyncMessage(''), 3000); // Clear message after 3s
     } catch (error) {
       console.error("Failed to sync with Notion:", error);

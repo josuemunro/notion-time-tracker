@@ -4,6 +4,7 @@ import { getActiveClients } from '../services/api';
 import { ArrowPathIcon, UserGroupIcon } from '@heroicons/react/24/solid';
 import { formatHoursHuman } from '../utils/timeUtils';
 import EmptyState from '../components/common/EmptyState';
+import { useSyncComplete } from '../utils/syncEvents';
 
 function ClientCard({ client }) {
   return (
@@ -53,6 +54,8 @@ function ClientsPage() {
       setIsLoading(false);
     }
   };
+
+  useSyncComplete(fetchClients);
 
   useEffect(() => {
     fetchClients();
