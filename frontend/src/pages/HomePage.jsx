@@ -338,19 +338,21 @@ function HomePage() {
               />
             )}
             {!isLoadingTasks && !errorTasks && inProgressTasksByProject.length > 0 && (
-              <div className="space-y-7">
+              // Two balanced columns on wide screens; CSS columns flow groups top-to-bottom
+              // and break-inside-avoid keeps each project's tasks together
+              <div className="lg:columns-2 lg:gap-8">
                 {inProgressTasksByProject.map((projectGroup) => (
-                  <div key={projectGroup.projectId || projectGroup.projectName}>
+                  <div key={projectGroup.projectId || projectGroup.projectName} className="break-inside-avoid mb-5">
                     {/* No underline — icon + name + count chip, whitespace separates groups */}
-                    <div className="flex items-center gap-2.5 mb-3">
+                    <div className="flex items-center gap-2 mb-2">
                       <ProjectIcon
                         iconType={projectGroup.projectIconType}
                         iconValue={projectGroup.projectIconValue}
                         projectName={projectGroup.projectName}
                         projectColor={projectGroup.projectColor}
-                        className="w-6 h-6"
+                        className="w-5 h-5"
                       />
-                      <h4 className="text-base font-semibold text-gray-900">
+                      <h4 className="text-sm font-semibold text-gray-900 truncate">
                         {projectGroup.projectName || 'Unnamed Project'}
                       </h4>
                       <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
@@ -358,7 +360,7 @@ function HomePage() {
                       </span>
                     </div>
                     {projectGroup.tasks && projectGroup.tasks.length > 0 ? (
-                      <div className="space-y-3">
+                      <div className="space-y-1.5">
                         {projectGroup.tasks.map((task) => (
                           <TaskItem
                             key={task.id || task.taskId}
@@ -379,6 +381,7 @@ function HomePage() {
                             onStartOverride={handleQuickStart}
                             onMarkDone={handleMarkDone}
                             onEditPricing={setPricingTask}
+                            compact
                           />
                         ))}
                       </div>

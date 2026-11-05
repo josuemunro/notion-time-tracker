@@ -4,7 +4,9 @@ import { useTimer } from '../../contexts/TimerContext';
 import { formatHoursHuman } from '../../utils/timeUtils';
 import { formatNZD } from '../../utils/billingUtils';
 
-function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPricing }) {
+// compact: single dense row for grouped lists (home Quick Start) — the group
+// header already names the project, so it's omitted here
+function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPricing, compact = false }) {
   const { startTimer, stopTimer, activeTimerDetails, isRunning } = useTimer();
   const isThisTaskActive = isRunning && activeTimerDetails?.taskId === task.id;
 
@@ -23,6 +25,76 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPri
       stopTimer();
     }
   };
+
+  if (compact) {
+    const name = task.name || task.taskName;
+    const chip = 'inline-flex flex-shrink-0 items-center rounded-full px-1.5 py-px text-[11px] font-medium';
+    const meta = [
+      !isThisTaskActive && task.status,
+      task.totalHoursSpent !== undefined && formatHoursHuman(parseFloat(task.totalHoursSpent || 0)),
+    ].filter(Boolean).join(' · ');
+
+    return (
+      <div className={`flex items-center gap-2 rounded-lg border pl-3 pr-1 py-1.5 transition-colors
+                       ${isThisTaskActive
+                         ? 'border-blue-300 bg-blue-50 ring-1 ring-blue-400'
+                         : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'}`}>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            {isThisTaskActive && <ClockIcon className="h-3.5 w-3.5 flex-shrink-0 text-blue-600 animate-pulse" aria-label="Active" />}
+            <span className={`truncate text-sm font-medium ${isThisTaskActive ? 'text-blue-700' : 'text-gray-900'}`} title={name}>
+              {name}
+            </span>
+            {task.isManual && <span className={`${chip} bg-amber-100 text-amber-700`}>Local</span>}
+            {task.fixedPrice != null && (
+              <span className={`${chip} bg-purple-100 text-purple-700`}>Fixed {formatNZD(task.fixedPrice)}</span>
+            )}
+            {task.fixedPrice == null && task.hourlyRateOverride != null && (
+              <span className={`${chip} bg-sky-100 text-sky-700`}>@{formatNZD(task.hourlyRateOverride)}/hr</span>
+            )}
+          </div>
+          {meta && <p className="text-xs text-gray-500 tabular-nums truncate">{meta}</p>}
+        </div>
+        <div className="flex flex-shrink-0 items-center">
+          {onEditPricing && (
+            <button
+              onClick={() => onEditPricing(task)}
+              className="p-1.5 rounded-full text-gray-400 hover:text-purple-600 hover:bg-purple-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 transition-colors"
+              title="Edit task pricing"
+            >
+              <CurrencyDollarIcon className="h-4 w-4" />
+            </button>
+          )}
+          {task.isManual && onMarkDone && !isThisTaskActive && (
+            <button
+              onClick={() => onMarkDone(task.id)}
+              className="p-1.5 rounded-full text-gray-400 hover:text-green-600 hover:bg-green-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400 transition-colors"
+              title="Mark as Done"
+            >
+              <CheckIcon className="h-4 w-4" />
+            </button>
+          )}
+          {isThisTaskActive ? (
+            <button
+              onClick={handleStop}
+              className="p-1.5 rounded-full text-red-500 hover:bg-red-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400 transition-colors"
+              title="Stop Timer"
+            >
+              <StopIcon className="h-6 w-6" />
+            </button>
+          ) : (
+            <button
+              onClick={handleStart}
+              className="p-1.5 rounded-full text-green-500 hover:bg-green-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400 transition-colors"
+              title="Start Timer"
+            >
+              <PlayIcon className="h-6 w-6" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`p-4 rounded-xl border transition-all duration-200 relative overflow-hidden
