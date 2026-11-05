@@ -150,6 +150,12 @@ function TaskPricingModal({ task, project, onClose, onSaved }) {
 
         {plan && (
           <div className="p-5 space-y-6 overflow-y-auto">
+            {!plan.projectIsBillable && (
+              <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                {plan.projectName || 'This project'} is set to non-billable, so this task won't show up for billing until the project is billable again.
+              </p>
+            )}
+
             {/* Pricing */}
             <section className="space-y-3">
               <h3 className={sectionTitle}>Pricing</h3>

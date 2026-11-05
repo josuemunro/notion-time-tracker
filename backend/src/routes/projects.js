@@ -21,6 +21,7 @@ async function listProjects(whereClause = '') {
       p.iconType,
       p.iconValue,
       p.color,
+      p.isBillable,
       p.createdAt AS projectCreatedAt,
       p.updatedAt AS projectUpdatedAt,
       c.id AS clientId,
@@ -36,7 +37,7 @@ async function listProjects(whereClause = '') {
     ORDER BY p.name COLLATE NOCASE;
   `, [], (err, result) => (err ? reject(err) : resolve(result))));
   const summaries = await billing.getUnbilledSummaries();
-  return rows.map(row => ({ ...row, ...summaries[row.id] }));
+  return rows.map(row => ({ ...row, isBillable: row.isBillable !== 0, ...summaries[row.id] }));
 }
 
 // GET /api/projects - Get all projects with aggregated time, client info and unbilled summary
@@ -66,7 +67,7 @@ router.get('/:projectId', async (req, res, next) => {
     const project = await dbGet(`
       SELECT
         p.id, p.notionId, p.name, p.hourlyRate, p.status, p.iconType, p.iconValue, p.color,
-        p.invoiceDayOfMonth, p.paymentTermsDays, p.createdAt, p.updatedAt,
+        p.invoiceDayOfMonth, p.paymentTermsDays, p.isBillable, p.createdAt, p.updatedAt,
         c.id AS clientId,
         c.name AS clientName,
         COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent
@@ -100,6 +101,7 @@ router.get('/:projectId', async (req, res, next) => {
     ]);
     res.json({
       ...project,
+      isBillable: project.isBillable !== 0,
       tasks: tasks.map(t => ({ ...t, installments: installmentsByTask.get(t.id) || [] })),
       billingItems,
       billedTotals,
@@ -155,13 +157,17 @@ router.post('/', async (req, res, next) => {
 
 // PUT /api/projects/:projectId - Update a project's local properties.
 // Body (any subset): color, hourlyRate, invoiceDayOfMonth (1-31 or null = invoice
-// as soon as work is done), paymentTermsDays (0-365 or null = unknown)
+// as soon as work is done), paymentTermsDays (0-365 or null = unknown),
+// isBillable (false = none of the project's work shows up for billing)
 router.put('/:projectId', async (req, res, next) => {
   const { projectId } = req.params;
-  const { color, hourlyRate, invoiceDayOfMonth, paymentTermsDays } = req.body;
+  const { color, hourlyRate, invoiceDayOfMonth, paymentTermsDays, isBillable } = req.body;
 
-  if (!color && hourlyRate === undefined && invoiceDayOfMonth === undefined && paymentTermsDays === undefined) {
-    return res.status(400).json({ message: 'Nothing to update: pass color, hourlyRate, invoiceDayOfMonth or paymentTermsDays.' });
+  if (!color && hourlyRate === undefined && invoiceDayOfMonth === undefined && paymentTermsDays === undefined && isBillable === undefined) {
+    return res.status(400).json({ message: 'Nothing to update: pass color, hourlyRate, invoiceDayOfMonth, paymentTermsDays or isBillable.' });
+  }
+  if (isBillable !== undefined && typeof isBillable !== 'boolean') {
+    return res.status(400).json({ message: 'isBillable must be a boolean.' });
   }
 
   // Validate hex color format if provided
@@ -185,7 +191,10 @@ router.put('/:projectId', async (req, res, next) => {
     return res.status(400).json({ message: 'paymentTermsDays must be a whole number from 0 to 365, or null.' });
   }
 
-  const fields = { color: color || undefined, hourlyRate, invoiceDayOfMonth, paymentTermsDays };
+  const fields = {
+    color: color || undefined, hourlyRate, invoiceDayOfMonth, paymentTermsDays,
+    isBillable: isBillable === undefined ? undefined : (isBillable ? 1 : 0),
+  };
   const updates = Object.entries(fields).filter(([, v]) => v !== undefined);
 
   try {

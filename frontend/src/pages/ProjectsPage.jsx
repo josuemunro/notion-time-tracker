@@ -57,7 +57,7 @@ function ProjectCard({ project }) {
             </p>
           </>
         ) : (
-          <p className="mt-0.5 text-lg font-semibold text-gray-400">Nothing to bill</p>
+          <p className="mt-0.5 text-lg font-semibold text-gray-400">{project.isBillable === false ? 'Non-billable' : 'Nothing to bill'}</p>
         )}
       </div>
 

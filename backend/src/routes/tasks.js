@@ -216,7 +216,8 @@ async function getTaskBillingPlan(taskId) {
     SELECT t.id, t.name, t.status, t.isManual, t.isBillable, t.beenBilled, t.fixedPrice,
            t.hourlyRateOverride, t.invoiceDate, t.projectId,
            p.name AS projectName, p.hourlyRate AS projectHourlyRate,
-           p.invoiceDayOfMonth AS projectInvoiceDayOfMonth, p.paymentTermsDays AS projectPaymentTermsDays
+           p.invoiceDayOfMonth AS projectInvoiceDayOfMonth, p.paymentTermsDays AS projectPaymentTermsDays,
+           p.isBillable AS projectIsBillable
     FROM Tasks t LEFT JOIN Projects p ON p.id = t.projectId
     WHERE t.id = ?
   `, [taskId]);
@@ -225,7 +226,12 @@ async function getTaskBillingPlan(taskId) {
     `SELECT id, label, amount, dueDate, billId, sortOrder FROM TaskInstallments WHERE taskId = ? ORDER BY sortOrder, id`,
     [task.id]
   );
-  return { ...task, isManual: !!task.isManual, isBillable: !!task.isBillable, beenBilled: !!task.beenBilled, installments };
+  return {
+    ...task,
+    isManual: !!task.isManual, isBillable: !!task.isBillable, beenBilled: !!task.beenBilled,
+    projectIsBillable: task.projectIsBillable !== 0, // false = the whole project is non-billable
+    installments,
+  };
 }
 
 // GET /api/tasks/:taskId/billing - The task's billing plan (pricing, invoice date, payment split)

@@ -17,7 +17,8 @@ function BillingOverview({ project, tasks }) {
   const totalUnbilledAmount = computeBillTotals(items, project.hourlyRate).subtotal;
   const totalUnbilledTime = items.filter(i => i.fixedPrice == null).reduce((sum, i) => sum + (i.hours || 0), 0);
 
-  const unbillableTasks = tasks.filter(task => !task.isBillable);
+  // In a non-billable project every task's time is unbillable
+  const unbillableTasks = project.isBillable === false ? tasks : tasks.filter(task => !task.isBillable);
   const totalUnbillableTime = unbillableTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
 
   const formatCurrency = formatNZD;

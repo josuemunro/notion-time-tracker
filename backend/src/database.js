@@ -213,6 +213,8 @@ function init() {
           // as soon as work is done) and how many days the client usually takes to pay
           db.run(`ALTER TABLE Projects ADD COLUMN invoiceDayOfMonth INTEGER`, () => { });
           db.run(`ALTER TABLE Projects ADD COLUMN paymentTermsDays INTEGER`, () => { });
+          // Local-only: 0 = the whole project is non-billable (its tasks never show for billing)
+          db.run(`ALTER TABLE Projects ADD COLUMN isBillable INTEGER DEFAULT 1`, () => { });
         });
 
         // Tasks Table

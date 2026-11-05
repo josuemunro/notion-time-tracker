@@ -117,7 +117,8 @@ function ProjectDetailPage() {
     }
   };
 
-  // Invoicing defaults. Saving refetches so the Unbilled list's due dates follow.
+  // Invoicing defaults and the project's Billable flag. Saving refetches so the
+  // Unbilled list (and its due dates) follow.
   const saveInvoicing = async (patch) => {
     setIsUpdatingInvoicing(true);
     setInvoicingError(null);
@@ -127,7 +128,7 @@ function ProjectDetailPage() {
       await fetchProject(true);
     } catch (err) {
       console.error('Failed to update invoicing settings:', err);
-      setInvoicingError(err.response?.data?.message || 'Failed to update invoicing settings.');
+      setInvoicingError(err.response?.data?.message || 'Failed to save project settings.');
     } finally {
       setIsUpdatingInvoicing(false);
     }
@@ -198,6 +199,7 @@ function ProjectDetailPage() {
   if (!project) return <p className="text-center text-gray-500">Project not found.</p>;
 
   const isPayRun = !!project.invoiceDayOfMonth;
+  const isProjectBillable = project.isBillable !== false;
 
   return (
     <div className="space-y-8">
@@ -343,65 +345,86 @@ function ProjectDetailPage() {
             </div>
           </div>
 
-          {/* Invoicing defaults: when finished work should be billed (tasks can override) */}
-          <div className="mt-4 space-y-1.5">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-gray-700">
-              <label htmlFor="invoicing-mode">Invoicing:</label>
-              <select
-                id="invoicing-mode"
-                value={isPayRun ? 'payrun' : 'asap'}
-                onChange={(e) => handleInvoicingModeChange(e.target.value)}
+          {/* Billable: off = none of this project's work shows up for billing anywhere */}
+          <div className="mt-4 space-y-1">
+            <label className="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isProjectBillable}
+                onChange={(e) => saveInvoicing({ isBillable: e.target.checked })}
                 disabled={isUpdatingInvoicing}
-                className="px-2 py-1 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-              >
-                <option value="asap">As soon as work is done</option>
-                <option value="payrun">Monthly pay run</option>
-              </select>
-              {isPayRun ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <label htmlFor="invoice-day">Invoice by the</label>
-                  <input
-                    id="invoice-day"
-                    type="number"
-                    min="1"
-                    max="31"
-                    value={invoiceDayInput}
-                    onChange={(e) => setInvoiceDayInput(e.target.value)}
-                    onBlur={() => commitInvoiceDay()}
-                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                    disabled={isUpdatingInvoicing}
-                    className="w-16 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                  />
-                  <span>of each month</span>
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5">
-                  <label htmlFor="payment-terms">Client usually pays within</label>
-                  <input
-                    id="payment-terms"
-                    type="number"
-                    min="0"
-                    max="365"
-                    value={termsInput}
-                    onChange={(e) => setTermsInput(e.target.value)}
-                    onBlur={() => commitPaymentTerms()}
-                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
-                    disabled={isUpdatingInvoicing}
-                    placeholder="—"
-                    className="w-16 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-                  />
-                  <span>days</span>
-                </span>
-              )}
-              {isUpdatingInvoicing && <ArrowPathIcon className="h-4 w-4 animate-spin text-gray-500" />}
-            </div>
+                className="h-4 w-4 rounded disabled:cursor-not-allowed"
+              />
+              Billable
+            </label>
             <p className="text-xs text-gray-500">
-              {isPayRun
-                ? `Hours logged so far are due on the next ${project.invoiceDayOfMonth ? ordinal(project.invoiceDayOfMonth) : 'cutoff'}, finished or not (short months use their last day); fixed prices wait until the task is done. Once billed in the two weeks before a cutoff, new work rolls to the next one.`
-                : 'Finished work is due straight away; unfinished work waits until it\'s done. The payment time estimates when the money arrives.'}
-              {' '}Tasks can set their own invoice date or payment split from their $ button.
+              {isProjectBillable
+                ? 'Untick for internal or personal work, so none of this project\'s tasks show up for billing.'
+                : 'None of this project\'s tasks show up for billing. Tick it again and any time that hasn\'t been billed comes back.'}
             </p>
           </div>
+
+          {/* Invoicing defaults: when finished work should be billed (tasks can override) */}
+          {isProjectBillable && (
+            <div className="mt-4 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-gray-700">
+                <label htmlFor="invoicing-mode">Invoicing:</label>
+                <select
+                  id="invoicing-mode"
+                  value={isPayRun ? 'payrun' : 'asap'}
+                  onChange={(e) => handleInvoicingModeChange(e.target.value)}
+                  disabled={isUpdatingInvoicing}
+                  className="px-2 py-1 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                >
+                  <option value="asap">As soon as work is done</option>
+                  <option value="payrun">Monthly pay run</option>
+                </select>
+                {isPayRun ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <label htmlFor="invoice-day">Invoice by the</label>
+                    <input
+                      id="invoice-day"
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={invoiceDayInput}
+                      onChange={(e) => setInvoiceDayInput(e.target.value)}
+                      onBlur={() => commitInvoiceDay()}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                      disabled={isUpdatingInvoicing}
+                      className="w-16 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                    />
+                    <span>of each month</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <label htmlFor="payment-terms">Client usually pays within</label>
+                    <input
+                      id="payment-terms"
+                      type="number"
+                      min="0"
+                      max="365"
+                      value={termsInput}
+                      onChange={(e) => setTermsInput(e.target.value)}
+                      onBlur={() => commitPaymentTerms()}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                      disabled={isUpdatingInvoicing}
+                      placeholder="—"
+                      className="w-16 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                    />
+                    <span>days</span>
+                  </span>
+                )}
+                {isUpdatingInvoicing && <ArrowPathIcon className="h-4 w-4 animate-spin text-gray-500" />}
+              </div>
+              <p className="text-xs text-gray-500">
+                {isPayRun
+                  ? `Hours logged so far are due on the next ${project.invoiceDayOfMonth ? ordinal(project.invoiceDayOfMonth) : 'cutoff'}, finished or not (short months use their last day); fixed prices wait until the task is done. Once billed in the two weeks before a cutoff, new work rolls to the next one.`
+                  : 'Finished work is due straight away; unfinished work waits until it\'s done. The payment time estimates when the money arrives.'}
+                {' '}Tasks can set their own invoice date or payment split from their $ button.
+              </p>
+            </div>
+          )}
 
           {/* Error Messages */}
           {colorError && (
@@ -418,11 +441,18 @@ function ProjectDetailPage() {
 
       {/* Billing Section */}
       <BillingOverview project={project} tasks={project.tasks || []} />
-      <UnbilledTasksSection
-        project={project}
-        onTasksBilled={handleTasksBilled}
-        onRefresh={() => fetchProject(true)}
-      />
+      {isProjectBillable ? (
+        <UnbilledTasksSection
+          project={project}
+          onTasksBilled={handleTasksBilled}
+          onRefresh={() => fetchProject(true)}
+        />
+      ) : (
+        <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">Unbilled Tasks</h2>
+          <EmptyState title="This project is non-billable" hint="Its tasks don't show up for billing. Tick Billable in Project Settings to change that." />
+        </div>
+      )}
       <PreviousBillsSection project={project} refreshToken={billsRefreshToken} onBillDeleted={() => fetchProject(true)} />
 
       <div>

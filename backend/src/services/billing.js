@@ -189,6 +189,8 @@ function buildBillingItems(project, tasks, installmentsByTask, today) {
  * a bill (`unbilledHours`, finished entries only — a running timer joins once
  * stopped). Whether there's anything to bill is decided per item. isBillable is
  * checked in JS so legacy boolean encodings behave like they do in the UI.
+ * Tasks in a non-billable project (Projects.isBillable = 0) are left out
+ * entirely, so they never reach any billing list or total.
  */
 async function getUnbilledTasks(projectId = null) {
   const rows = await dbAll(`
@@ -197,6 +199,7 @@ async function getUnbilledTasks(projectId = null) {
            COALESCE(SUM(te.duration), 0) / 3600.0 AS hours,
            COALESCE(SUM(CASE WHEN te.billId IS NULL THEN te.duration END), 0) / 3600.0 AS unbilledHours
     FROM Tasks t
+    JOIN Projects p ON p.id = t.projectId AND COALESCE(p.isBillable, 1) <> 0
     LEFT JOIN TimeEntries te ON te.taskId = t.id AND te.endTime IS NOT NULL
     WHERE t.projectId IS NOT NULL ${projectId != null ? 'AND t.projectId = ?' : ''}
     GROUP BY t.id
