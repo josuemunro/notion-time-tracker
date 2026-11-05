@@ -15,10 +15,17 @@ Read `AI_PROJECT_GUIDE.md` at the project root for full architecture, API refere
 
 ## Key Conventions
 
-- Timezone is **Pacific/Auckland** (NZ). All date logic must account for this.
+- Timestamps are stored as **real UTC** ISO strings. Day boundaries, timeline positions and midnight splitting use the **display timezone** in `Settings.timeZone` (default Pacific/Auckland, editable in the app). Go through `frontend/src/utils/timeUtils.js` / `backend/src/utils/time.js` — never the browser's zone or `getUTC*` for display.
 - Currency is **NZD** with **15% GST**. Billing rounds time up to 0.25h increments.
-- Notion sync is manual (`POST /api/sync/notion`). Never add auto-sync without discussion.
-- The app is single-user with no auth layer.
+- Notion sync is manual (`POST /api/sync/notion`). Never add auto-sync without discussion. After a sync the Navbar fires a sync-complete event (`utils/syncEvents.js`); pages showing synced data refetch on it.
+- The app is single-user, behind one password (`APP_PASSWORD` → stateless HMAC tokens; unset = no auth in local dev).
+
+## Billing
+
+- Bill maths and the "what to invoice, and when" rules live in `backend/src/services/billing.js` (source of truth; `frontend/src/utils/billingUtils.js` mirrors the maths for previews).
+- Hourly work is billed **per time entry** (`TimeEntries.billId`), so ongoing tasks can be billed repeatedly. Fixed prices bill once (`Tasks.beenBilled`) or through a payment split (`TaskInstallments`).
+- Bills have a `kind`: `invoice`, `external` (already billed elsewhere) or `waived` (written off). All mark work billed; undo = delete the bill. Waived never counts as billed money.
+- Projects set when to invoice (as soon as done, or a monthly pay-run cutoff); tasks can override with an invoice date.
 - SQLite migrations use `ALTER TABLE ... ADD COLUMN` with silent no-op in `database.js`.
 - Frontend proxies `/api` to the backend (Vite in dev, nginx in prod).
 
@@ -30,10 +37,6 @@ Read `AI_PROJECT_GUIDE.md` at the project root for full architecture, API refere
 
 ## Timeline Component
 
-`TimelineView.jsx` is the most complex component. After changes, update the version log:
+`TimelineView.jsx` is the most complex component. After changes, add an entry to the version log comment at the top of the file (`// v1.x — <description>`).
 
-```js
-console.log("🕒 TimelineView last updated @ <date> — <description>");
-```
-
-Test drag, resize, create, and delete interactions after any timeline edit.
+Test drag, resize, create, and click-to-select (Resume / Delete bar, incl. on very narrow entries) after any timeline edit.

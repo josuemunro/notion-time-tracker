@@ -287,7 +287,7 @@ The Notion integration expects these exact property names:
 ### Projects DB
 - **Project Name** (title)
 - **Client Link** (relation → Clients)
-- **Budget (hrs)** (number)
+- **Budget (hrs)** (number) — still synced into `budgetedTime`, no longer shown in the app
 - **Status** (status or select)
 - **Color** (select, optional)
 - Page icon (emoji, external URL, or file)
