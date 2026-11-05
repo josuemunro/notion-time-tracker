@@ -60,7 +60,7 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPri
             <button
               onClick={() => onEditPricing(task)}
               className="p-1.5 rounded-full text-gray-400 hover:text-purple-600 hover:bg-purple-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 transition-colors"
-              title="Edit task pricing"
+              title="Pricing & invoicing"
             >
               <CurrencyDollarIcon className="h-4 w-4" />
             </button>
@@ -141,7 +141,7 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPri
             <button
               onClick={() => onEditPricing(task)}
               className="p-2 rounded-full text-gray-400 hover:text-purple-600 hover:bg-purple-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 transition-colors duration-200"
-              title="Edit task pricing"
+              title="Pricing & invoicing"
             >
               <CurrencyDollarIcon className="h-5 w-5 sm:h-6 sm:w-6" />
             </button>

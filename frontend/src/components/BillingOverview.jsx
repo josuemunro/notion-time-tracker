@@ -14,9 +14,13 @@ function BillingOverview({ project, tasks }) {
   const totalUnbilledTime = unbilledTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
   const totalUnbillableTime = unbillableTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
 
-  const totalBilledAmount = billedTasks.reduce((sum, task) => sum + taskBillAmount(task, project.hourlyRate), 0);
-  // What billing everything outstanding would come to (bill rounding, ex GST) — matches the projects page
-  const totalUnbilledAmount = computeBillTotals(unbilledTasks, project.hourlyRate).subtotal;
+  // Split fixed-price tasks count their already-invoiced payments as billed
+  const billedPayments = unbilledTasks.reduce((sum, task) =>
+    sum + (task.installments || []).filter(i => i.billId != null).reduce((s, i) => s + i.amount, 0), 0);
+  const totalBilledAmount = billedTasks.reduce((sum, task) => sum + taskBillAmount(task, project.hourlyRate), 0) + billedPayments;
+  // What billing everything outstanding would come to (bill rounding, ex GST) — the
+  // server's billing items, so it matches the projects page and the Unbilled list
+  const totalUnbilledAmount = computeBillTotals(project.billingItems || [], project.hourlyRate).subtotal;
 
   const formatCurrency = formatNZD;
 

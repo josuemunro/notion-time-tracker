@@ -36,8 +36,10 @@ notion-time-tracker/
 │       │   ├── projects.js
 │       │   ├── tasks.js
 │       │   ├── timeEntries.js
+│       │   ├── billing.js    # Billing schedule (what to invoice, and when)
 │       │   └── sync.js
 │       └── services/
+│           ├── billing.js        # Bill maths + unbilled items + invoice timing rules
 │           └── notionService.js  # Notion API + sync logic
 │
 └── frontend/
@@ -52,28 +54,31 @@ notion-time-tracker/
         │   ├── TimerContext.jsx   # Active timer state, favicon, doc title
         │   └── ToastContext.jsx   # Toast notifications + undo actions
         ├── pages/
-        │   ├── HomePage.jsx       # Dashboard: money timer + Quick Start + Timeline
+        │   ├── HomePage.jsx       # Dashboard: money timer + Timeline + Quick Start (2 columns) + Billing
         │   ├── CalendarPage.jsx   # Read-only week view with day/week totals + $
         │   ├── ClientsPage.jsx    # Active clients grid
         │   ├── ClientDetailPage.jsx
-        │   ├── ProjectsPage.jsx   # Active projects grid
-        │   ├── ProjectDetailPage.jsx  # Settings, billing, tasks
+        │   ├── ProjectsPage.jsx   # Active projects grid, led by each project's unbilled amount
+        │   ├── ProjectDetailPage.jsx  # Settings (incl. invoicing defaults), billing, tasks
         │   └── TasksPage.jsx      # All tasks list
         ├── components/
         │   ├── layout/Navbar.jsx
-        │   ├── common/TaskItem.jsx     # Play/stop per task + pricing badge
+        │   ├── common/TaskItem.jsx     # Play/stop per task + pricing badge (`compact` row variant)
         │   ├── MoneyTimer.jsx          # WebGL shader timer with live $ earnings
-        │   ├── TimelineView.jsx        # Day timeline (drag, resize, create, zoom)
+        │   ├── TimelineView.jsx        # Day timeline (drag, resize, create, zoom, select → Resume/Delete)
+        │   ├── BillingSchedule.jsx     # Home billing area: send now / upcoming / in progress
         │   ├── ProjectIcon.jsx         # Emoji / image / fallback
         │   ├── TaskSelectionModal.jsx   # Pick task for manual entry
-        │   ├── TaskPricingModal.jsx     # Per-task pricing (inherit/override/fixed)
+        │   ├── TaskPricingModal.jsx     # Pricing & invoicing: pricing, invoice date, payment split
         │   ├── BillingOverview.jsx      # Billed / unbilled summary
-        │   ├── UnbilledTasksSection.jsx # Select + preview billing
+        │   ├── UnbilledTasksSection.jsx # Select + preview billing (tasks and split payments, with due dates)
         │   ├── BillingModal.jsx         # Final bill with copy/undo
         │   └── PreviousBillsSection.jsx # Bill history with task breakdowns
         └── utils/
-            ├── timeUtils.js     # Date helpers (zone-aware via the configured display timezone)
-            └── billingUtils.js  # Billing + earnings math (mirrors server rules)
+            ├── timeUtils.js       # Date helpers (zone-aware via the configured display timezone)
+            ├── billingUtils.js    # Billing + earnings math (mirrors server rules)
+            ├── billingSchedule.js # Wording for send-by badges + createBill payload
+            └── syncEvents.js      # "Notion sync finished" event; pages refetch on it
 ```
 
 ---
@@ -181,14 +186,14 @@ The client (`TimerContext`) calls `rollover` from its 1-second tick when the loc
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/projects` | All projects with time + client info |
-| GET | `/api/projects/active` | Projects with status Proposal/In progress/Ongoing |
-| GET | `/api/projects/:id` | Project detail + tasks |
-| PUT | `/api/projects/:id` | Update `color` (hex) and/or `hourlyRate` |
+| GET | `/api/projects` | All projects with time, client info and unbilled summary (`unbilledAmount` ex GST, `unbilledHours`, `unbilledTaskCount`, `readyAmount`, `lastBilledAt`) |
+| GET | `/api/projects/active` | Same, for status Proposal/In progress/Ongoing |
+| GET | `/api/projects/:id` | Project detail + tasks (with `invoiceDate`, `installments[]`) + `billingItems[]` (what's unbilled and when to invoice it) |
+| PUT | `/api/projects/:id` | Update any of `color` (hex), `hourlyRate`, `invoiceDayOfMonth` (1–31 or null), `paymentTermsDays` (0–365 or null) |
 | PUT | `/api/projects/:id/tasks/billing` | Bulk set `beenBilled` for `taskIds[]` |
-| POST | `/api/projects/:id/bills` | Create bill snapshot from `taskIds[]`; computes hours/GST server-side, marks tasks billed |
+| POST | `/api/projects/:id/bills` | Create bill snapshot from `taskIds[]` and/or `installmentIds[]` (payments of split tasks); computes hours/GST server-side, marks them billed |
 | GET | `/api/projects/:id/bills` | List bills (newest first) with task snapshots |
-| DELETE | `/api/projects/:id/bills/:billId` | Delete bill + un-bill its tasks (undo) |
+| DELETE | `/api/projects/:id/bills/:billId` | Delete bill + un-bill its tasks and payments (undo) |
 | POST | `/api/projects/test` | Create test project + sample tasks |
 | DELETE | `/api/projects/:id` | Cascade delete project, tasks, time entries |
 
@@ -200,7 +205,8 @@ The client (`TimerContext`) calls `rollover` from its 1-second tick when the loc
 | GET | `/api/tasks/in-progress` | Quick Start list (grouped by project) |
 | GET | `/api/tasks/:id` | Task detail + time entries |
 | PATCH | `/api/tasks/:id/status` | Update task status (To Do / Doing / Done) |
-| PATCH | `/api/tasks/:id/pricing` | Set `fixedPrice` or `hourlyRateOverride` (null clears; at most one) |
+| GET | `/api/tasks/:id/billing` | Billing plan: pricing, `invoiceDate`, `installments[]`, project invoicing defaults |
+| PUT | `/api/tasks/:id/billing` | Replace the plan: `fixedPrice` or `hourlyRateOverride` (at most one), `invoiceDate`, `installments[]` (unbilled payments; with invoiced ones they must add up to `fixedPrice`), `isBillable` (local tasks only) |
 
 ### Time Entries
 
@@ -214,6 +220,12 @@ The client (`TimerContext`) calls `rollover` from its 1-second tick when the loc
 | PUT | `/api/time-entries/:id` | Update entry times. Splits at midnight (extra rows inserted) |
 | DELETE | `/api/time-entries/:id` | Delete entry |
 | GET | `/api/time-entries` | List. Query: `?date=`, `?startDate=`, `?endDate=` (YYYY-MM-DD, local days in the configured timezone). Rows include `localDate` |
+
+### Billing
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/billing/schedule` | Unbilled work across all projects, grouped into would-be invoices (`due` / `upcoming` / `waiting`) with send-by and expected payment dates. Rules: `services/billing.js` |
 
 ### Sync
 
@@ -243,14 +255,17 @@ The client (`TimerContext`) calls `rollover` from its 1-second tick when the loc
 
 ```
 Clients (id, notionId, name, status)
-  └── Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color)
-        ├── Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage)
-        │     └── TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
-        └── Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, createdAt)
-              └── BillTasks (id, billId, taskId, taskName, hoursSpent)
+  └── Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color, invoiceDayOfMonth, paymentTermsDays)
+        ├── Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage, isManual, fixedPrice, hourlyRateOverride, invoiceDate)
+        │     ├── TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
+        │     └── TaskInstallments (id, taskId, label, amount, dueDate, billId, sortOrder)
+        └── Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt)
+              └── BillTasks (id, billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId)
 ```
 
-`Bills`/`BillTasks` are snapshots frozen at billing time — task names and hours are copied in so bill history survives task renames and deletions. Deleting a bill resets `beenBilled` on its tasks.
+`Bills`/`BillTasks` are snapshots frozen at billing time — task names and hours are copied in so bill history survives task renames and deletions. Deleting a bill resets `beenBilled` on its tasks and releases its payments (`TaskInstallments.billId = NULL`).
+
+`TaskInstallments` is a fixed-price task's payment split (local-only). Amounts add up to the task's `fixedPrice`; `dueDate` NULL means "when the task is done". Each payment is billed on its own; the task's `beenBilled` flips once every payment has a `billId`. `budgetedTime` is still synced from Notion but no longer shown anywhere.
 
 - `notionId` columns are the Notion page UUIDs, used for sync deduplication (UNIQUE constraint)
 - `notionClientId` / `notionProjectId` store the raw Notion relation IDs; `clientId` / `projectId` are resolved local FKs (updated by `updateLocalRelationalIds()` after each sync)
@@ -290,11 +305,12 @@ The Notion integration expects these exact property names:
 
 1. **Timezone**: Timestamps are **real UTC ISO strings**. Calendar-day logic (day boundaries, timeline positions, midnight splitting) uses the display timezone stored in `Settings.timeZone` (default `Pacific/Auckland`, editable on the Settings page). Frontend: always go through `utils/timeUtils.js`; backend: `utils/time.js`. Never use `getUTC*` or the browser's local zone for display. Time entries never cross local midnight — the server splits them, and a running timer rolls over via `POST /time-entries/:id/rollover`.
 2. **Currency**: NZD with 15% GST for billing calculations.
-3. **Billing rounding + per-task pricing**: Hours round up to 0.25h. Tasks may carry local-only pricing (`fixedPrice` or `hourlyRateOverride`, set via `TaskPricingModal`, never synced to Notion): fixed tasks bill their flat price, override tasks bill their rounded hours at their own rate, everything else pools hours (rounded once) at the project rate. Client math in `utils/billingUtils.js`; server (bills endpoint in `projects.js`) is the source of truth. The MoneyTimer shows hourly earnings ticking up, or a fixed task's live effective $/hr ticking down.
+3. **Billing rounding + per-task pricing**: Hours round up to 0.25h. Tasks may carry local-only pricing (`fixedPrice` or `hourlyRateOverride`, set via `TaskPricingModal`, never synced to Notion): fixed tasks bill their flat price, override tasks bill their rounded hours at their own rate, everything else pools hours (rounded once) at the project rate. Client math in `utils/billingUtils.js`; server (`services/billing.js`, used by the bills endpoint) is the source of truth. The MoneyTimer shows hourly earnings ticking up, or a fixed task's live effective $/hr ticking down.
 4. **Icon caching**: Notion file URLs expire after ~1 hour, so project icons are downloaded on sync and served statically (from the `/data` volume in production).
 5. **Auth**: Single password (`APP_PASSWORD`). Login issues stateless HMAC-signed tokens (secret derived from `APP_PASSWORD`, 30-day expiry) verified in `app.js` — no server-side session state, so sessions survive restarts, redeploys, and Railway App Sleeping. Changing `APP_PASSWORD` invalidates all tokens. No password set = auth disabled (local dev).
 6. **No auto-sync**: Sync is manual to avoid Notion rate limits.
 7. **Statelessness matters**: Railway App Sleeping stops the process when idle, so never keep durable state only in backend memory — persist to SQLite on `/data` or make it derivable (like the auth tokens).
+8. **When to invoice** (`services/billing.js`): unbilled work becomes billing items — one per hourly task with time, per unsplit fixed-price task, or per unbilled payment of a split one. An explicit date wins (payment `dueDate`, task `invoiceDate`). Otherwise the task must be Done (until then it's "waiting"); finished work is due on the next pay-run cutoff if the project has `invoiceDayOfMonth` (clamped to short months), else today. `paymentTermsDays` adds an expected payment date. Billing is still whole-task: billing an unfinished hourly task bills its hours so far and later hours on it won't show as unbilled — which is why unfinished work waits by default.
 
 ---
 

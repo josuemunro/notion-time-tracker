@@ -9,6 +9,7 @@ const timeEntryRoutes = require('./timeEntries');
 const syncRoutes = require('./sync');
 const settingsRoutes = require('./settings');
 const backupRoutes = require('./backup');
+const billingRoutes = require('./billing');
 
 router.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'API is healthy and running' });
@@ -21,5 +22,6 @@ router.use('/time-entries', timeEntryRoutes); // For managing time entries, incl
 router.use('/sync', syncRoutes); // For Notion sync trigger and webhook
 router.use('/settings', settingsRoutes); // App settings (timezone)
 router.use('/backup', backupRoutes); // Database backup download + on-volume snapshots
+router.use('/billing', billingRoutes); // Billing schedule (what to invoice, and when)
 
 module.exports = router;

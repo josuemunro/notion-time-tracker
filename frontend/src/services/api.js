@@ -65,8 +65,9 @@ export const updateTasksBillingStatus = (projectId, taskIds, beenBilled) =>
   apiClient.put(`/projects/${projectId}/tasks/billing`, { taskIds, beenBilled });
 export const createTestProject = () => apiClient.post('/projects/test');
 
-// Bills
-export const createBill = (projectId, taskIds) => apiClient.post(`/projects/${projectId}/bills`, { taskIds });
+// Bills — taskIds for whole tasks, installmentIds for payments of split fixed-price tasks
+export const createBill = (projectId, { taskIds = [], installmentIds = [] }) =>
+  apiClient.post(`/projects/${projectId}/bills`, { taskIds, installmentIds });
 export const getProjectBills = (projectId) => apiClient.get(`/projects/${projectId}/bills`);
 export const deleteBill = (projectId, billId) => apiClient.delete(`/projects/${projectId}/bills/${billId}`);
 export const deleteProject = (projectId) => apiClient.delete(`/projects/${projectId}`);
@@ -77,7 +78,12 @@ export const getTaskDetails = (taskId) => apiClient.get(`/tasks/${taskId}`);
 export const getTasksInProgress = () => apiClient.get('/tasks/in-progress');
 export const createTask = (taskData) => apiClient.post('/tasks', taskData);
 export const updateTaskStatus = (taskId, status) => apiClient.patch(`/tasks/${taskId}/status`, { status });
-export const updateTaskPricing = (taskId, pricing) => apiClient.patch(`/tasks/${taskId}/pricing`, pricing);
+// Billing plan: pricing, invoice date, fixed-price payment split, billable (local tasks)
+export const getTaskBilling = (taskId) => apiClient.get(`/tasks/${taskId}/billing`);
+export const updateTaskBilling = (taskId, plan) => apiClient.put(`/tasks/${taskId}/billing`, plan);
+
+// Billing schedule (home page): what needs invoicing, grouped by project and send-by date
+export const getBillingSchedule = () => apiClient.get('/billing/schedule');
 
 // Projects (manual creation)
 export const createProject = (projectData) => apiClient.post('/projects', projectData);

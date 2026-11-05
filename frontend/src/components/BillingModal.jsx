@@ -3,17 +3,21 @@ import { XMarkIcon, ClipboardIcon, CheckIcon } from '@heroicons/react/24/solid';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { createBill, deleteBill } from '../services/api';
 import { computeBillTotals, formatNZD } from '../utils/billingUtils';
+import { billPayload } from '../utils/billingSchedule';
 import { useToast } from '../contexts/ToastContext';
 
-function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
+// items: billing items from the server (services/billing) — whole tasks
+// (kind 'task') and/or payments of split fixed-price tasks (kind 'installment')
+function BillingModal({ project, items, onClose, onCompleted }) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [copiedType, setCopiedType] = useState(null);
-  const { showUndo } = useToast();
+  const { showUndo, showError } = useToast();
 
-  if (!project || !selectedTasks || selectedTasks.length === 0) return null;
+  if (!project || !items || items.length === 0) return null;
 
   const { totalHours: totalTime, roundedHours: roundedTime, fixedAmount, subtotal, gst, total } =
-    computeBillTotals(selectedTasks, project.hourlyRate);
+    computeBillTotals(items, project.hourlyRate);
+  const hasHourlyItems = items.some(i => i.fixedPrice == null);
   const formatCurrency = formatNZD;
 
   const copyToClipboard = async (text, type) => {
@@ -29,27 +33,27 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
   const handleCompleteBill = async () => {
     setIsUpdating(true);
     try {
-      const taskIds = selectedTasks.map(task => task.id);
-      // Creates a Bill record (snapshot of hours + financials) and marks tasks billed
-      const { data: bill } = await createBill(project.id, taskIds);
+      // Creates a Bill record (snapshot of hours + financials) and marks its tasks/payments billed
+      const { data: bill } = await createBill(project.id, billPayload(items));
 
-      // Show undo toast — undo deletes the bill and un-bills its tasks
+      // Show undo toast — undo deletes the bill and un-bills its tasks and payments
       showUndo(
-        `Bill completed for ${selectedTasks.length} task${selectedTasks.length !== 1 ? 's' : ''}`,
+        `Bill completed for ${items.length} item${items.length !== 1 ? 's' : ''} (${formatNZD(total)})`,
         async () => {
           try {
             await deleteBill(project.id, bill.billId);
-            onCompleted(taskIds); // Refresh the data
+            onCompleted(); // Refresh the data
           } catch (error) {
             console.error('Failed to undo billing:', error);
+            showError('Failed to undo the bill');
           }
         }
       );
 
-      onCompleted(taskIds);
+      onCompleted();
     } catch (error) {
-      console.error('Failed to update billing status:', error);
-      alert('Failed to update billing status. Please try again.');
+      console.error('Failed to create bill:', error);
+      showError(error.response?.data?.message || 'Failed to create the bill. Please try again.');
     } finally {
       setIsUpdating(false);
     }
@@ -86,34 +90,43 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
 
           {/* Task Details */}
           <div>
-            <h3 className="font-semibold text-gray-800 mb-3">Tasks Included:</h3>
+            <h3 className="font-semibold text-gray-800 mb-3">Included:</h3>
             <div className="space-y-2">
-              {selectedTasks.map(task => (
-                <div key={task.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              {items.map(item => (
+                <div key={item.key} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                   <div>
-                    <p className="font-medium text-gray-800">{task.name}</p>
+                    <p className="font-medium text-gray-800">
+                      {item.name}
+                      {item.label && <span className="font-normal text-gray-500"> — {item.label}</span>}
+                    </p>
                     <p className="text-sm text-gray-600">
-                      Status: {task.status}
-                      {task.fixedPrice != null && <span className="ml-2 text-purple-700 font-medium">Fixed price</span>}
-                      {task.fixedPrice == null && task.hourlyRateOverride != null && (
-                        <span className="ml-2 text-sky-700 font-medium">@{formatNZD(task.hourlyRateOverride)}/hr</span>
+                      Status: {item.status}
+                      {item.kind === 'installment' && (
+                        <span className="ml-2 text-purple-700 font-medium">Payment {item.paymentNumber} of {item.paymentCount}</span>
+                      )}
+                      {item.kind === 'task' && item.fixedPrice != null && <span className="ml-2 text-purple-700 font-medium">Fixed price</span>}
+                      {item.fixedPrice == null && item.hourlyRateOverride != null && (
+                        <span className="ml-2 text-sky-700 font-medium">@{formatNZD(item.hourlyRateOverride)}/hr</span>
                       )}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="font-medium text-gray-800">
-                      {task.fixedPrice != null ? formatNZD(task.fixedPrice) : formatHoursHuman(task.totalHoursSpent || 0)}
+                      {item.fixedPrice != null ? formatNZD(item.fixedPrice) : formatHoursHuman(item.totalHoursSpent || 0)}
                     </p>
-                    <p className="text-sm text-gray-600">
-                      {(task.totalHoursSpent || 0).toFixed(2)}h decimal
-                    </p>
+                    {item.kind === 'task' && (
+                      <p className="text-sm text-gray-600">
+                        {(item.totalHoursSpent || 0).toFixed(2)}h decimal
+                      </p>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Time Summary */}
+          {/* Time Summary (only meaningful when something bills by the hour) */}
+          {hasHourlyItems && (
           <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
             <h3 className="font-semibold text-blue-800 mb-3">Time Summary</h3>
             <div className="space-y-2">
@@ -156,6 +169,7 @@ function BillingModal({ project, selectedTasks, onClose, onCompleted }) {
               </div>
             </div>
           </div>
+          )}
 
           {/* Financial Summary */}
           <div className="bg-green-50 p-4 rounded-lg border border-green-200">

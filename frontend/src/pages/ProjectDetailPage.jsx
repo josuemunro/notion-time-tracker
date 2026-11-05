@@ -10,6 +10,7 @@ import TaskPricingModal from '../components/TaskPricingModal';
 import { ArrowPathIcon, ArrowLeftIcon, TrashIcon } from '@heroicons/react/24/solid';
 import EmptyState from '../components/common/EmptyState';
 import { formatHoursHuman } from '../utils/timeUtils';
+import { ordinal } from '../utils/billingSchedule';
 import { useTimer } from '../contexts/TimerContext'; // Import useTimer
 import { useSyncComplete } from '../utils/syncEvents';
 
@@ -27,6 +28,10 @@ function ProjectDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [hexInput, setHexInput] = useState('');
   const [rateInput, setRateInput] = useState(''); // Add separate state for rate input
+  const [invoiceDayInput, setInvoiceDayInput] = useState(''); // Pay-run cutoff day (1-31)
+  const [termsInput, setTermsInput] = useState(''); // Days the client usually takes to pay
+  const [isUpdatingInvoicing, setIsUpdatingInvoicing] = useState(false);
+  const [invoicingError, setInvoicingError] = useState(null);
   const [billsRefreshToken, setBillsRefreshToken] = useState(0); // Bump to refetch Previous Bills
   const [pricingTask, setPricingTask] = useState(null); // Task being edited in TaskPricingModal
   const { startTimer, activeTimerDetails, isRunning } = useTimer(); // Get timer functions
@@ -49,6 +54,8 @@ function ProjectDetailPage() {
       if (!skipInputUpdate && !isUpdatingColor && !isUpdatingRate) {
         setHexInput(data.color || '#6366f1');
         setRateInput(data.hourlyRate === 0 ? '' : String(data.hourlyRate));
+        setInvoiceDayInput(data.invoiceDayOfMonth ? String(data.invoiceDayOfMonth) : '');
+        setTermsInput(data.paymentTermsDays != null ? String(data.paymentTermsDays) : '');
       }
       setError(null);
     } catch (err) {
@@ -101,6 +108,7 @@ function ProjectDetailPage() {
       await updateProject(projectId, { hourlyRate: rateValue });
       setProject(prev => ({ ...prev, hourlyRate: rateValue }));
       setRateInput(rateValue === 0 ? '' : String(rateValue));
+      fetchProject(true); // unbilled amounts are priced server-side at the project rate
     } catch (err) {
       console.error('Failed to update project rate:', err);
       setRateError('Failed to update rate. Please try again.');
@@ -109,7 +117,56 @@ function ProjectDetailPage() {
     }
   };
 
-  const handleTasksBilled = async (taskIds) => {
+  // Invoicing defaults. Saving refetches so the Unbilled list's due dates follow.
+  const saveInvoicing = async (patch) => {
+    setIsUpdatingInvoicing(true);
+    setInvoicingError(null);
+    try {
+      await updateProject(projectId, patch);
+      setProject(prev => ({ ...prev, ...patch }));
+      await fetchProject(true);
+    } catch (err) {
+      console.error('Failed to update invoicing settings:', err);
+      setInvoicingError(err.response?.data?.message || 'Failed to update invoicing settings.');
+    } finally {
+      setIsUpdatingInvoicing(false);
+    }
+  };
+
+  const handleInvoicingModeChange = (mode) => {
+    if (mode === 'payrun') {
+      // 20th is the common NZ cutoff; payment terms only apply to as-soon-as-done projects
+      const day = parseInt(invoiceDayInput, 10) || 20;
+      setInvoiceDayInput(String(day));
+      saveInvoicing({ invoiceDayOfMonth: day, paymentTermsDays: null });
+      setTermsInput('');
+    } else {
+      saveInvoicing({ invoiceDayOfMonth: null });
+    }
+  };
+
+  const commitInvoiceDay = () => {
+    const day = parseInt(invoiceDayInput, 10);
+    if (Number.isInteger(day) && day >= 1 && day <= 31) {
+      if (day !== project.invoiceDayOfMonth) saveInvoicing({ invoiceDayOfMonth: day });
+      setInvoiceDayInput(String(day));
+    } else {
+      setInvoiceDayInput(project.invoiceDayOfMonth ? String(project.invoiceDayOfMonth) : '');
+    }
+  };
+
+  const commitPaymentTerms = () => {
+    const trimmed = termsInput.trim();
+    const days = trimmed === '' ? null : parseInt(trimmed, 10);
+    if (days === null || (Number.isInteger(days) && days >= 0 && days <= 365)) {
+      if (days !== (project.paymentTermsDays ?? null)) saveInvoicing({ paymentTermsDays: days });
+      setTermsInput(days === null ? '' : String(days));
+    } else {
+      setTermsInput(project.paymentTermsDays != null ? String(project.paymentTermsDays) : '');
+    }
+  };
+
+  const handleTasksBilled = async () => {
     // Refresh project data after billing tasks
     await fetchProject(true); // Skip input update when refreshing after billing
     setBillsRefreshToken(prev => prev + 1); // Refetch Previous Bills (also fires on undo)
@@ -139,6 +196,8 @@ function ProjectDetailPage() {
   }
   if (error) return <p className="text-center text-red-600 bg-red-50 border border-red-200 p-4 rounded-lg">{error}</p>;
   if (!project) return <p className="text-center text-gray-500">Project not found.</p>;
+
+  const isPayRun = !!project.invoiceDayOfMonth;
 
   return (
     <div className="space-y-8">
@@ -284,12 +343,75 @@ function ProjectDetailPage() {
             </div>
           </div>
 
+          {/* Invoicing defaults: when finished work should be billed (tasks can override) */}
+          <div className="mt-4 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-gray-700">
+              <label htmlFor="invoicing-mode">Invoicing:</label>
+              <select
+                id="invoicing-mode"
+                value={isPayRun ? 'payrun' : 'asap'}
+                onChange={(e) => handleInvoicingModeChange(e.target.value)}
+                disabled={isUpdatingInvoicing}
+                className="px-2 py-1 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              >
+                <option value="asap">As soon as work is done</option>
+                <option value="payrun">Monthly pay run</option>
+              </select>
+              {isPayRun ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <label htmlFor="invoice-day">Invoice by the</label>
+                  <input
+                    id="invoice-day"
+                    type="number"
+                    min="1"
+                    max="31"
+                    value={invoiceDayInput}
+                    onChange={(e) => setInvoiceDayInput(e.target.value)}
+                    onBlur={() => commitInvoiceDay()}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                    disabled={isUpdatingInvoicing}
+                    className="w-16 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  />
+                  <span>of each month</span>
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5">
+                  <label htmlFor="payment-terms">Client usually pays within</label>
+                  <input
+                    id="payment-terms"
+                    type="number"
+                    min="0"
+                    max="365"
+                    value={termsInput}
+                    onChange={(e) => setTermsInput(e.target.value)}
+                    onBlur={() => commitPaymentTerms()}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); }}
+                    disabled={isUpdatingInvoicing}
+                    placeholder="—"
+                    className="w-16 px-2 py-1 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                  />
+                  <span>days</span>
+                </span>
+              )}
+              {isUpdatingInvoicing && <ArrowPathIcon className="h-4 w-4 animate-spin text-gray-500" />}
+            </div>
+            <p className="text-xs text-gray-500">
+              {isPayRun
+                ? `Finished work is due on the next ${project.invoiceDayOfMonth ? ordinal(project.invoiceDayOfMonth) : 'cutoff'} (short months use their last day).`
+                : 'Finished work is due straight away. The payment time estimates when the money arrives.'}
+              {' '}Tasks can set their own invoice date or payment split from their $ button.
+            </p>
+          </div>
+
           {/* Error Messages */}
           {colorError && (
             <p className="text-sm text-red-600 mt-2">{colorError}</p>
           )}
           {rateError && (
             <p className="text-sm text-red-600 mt-2">{rateError}</p>
+          )}
+          {invoicingError && (
+            <p className="text-sm text-red-600 mt-2">{invoicingError}</p>
           )}
         </div>
       </div>
@@ -298,7 +420,6 @@ function ProjectDetailPage() {
       <BillingOverview project={project} tasks={project.tasks || []} />
       <UnbilledTasksSection
         project={project}
-        tasks={project.tasks || []}
         onTasksBilled={handleTasksBilled}
         onRefresh={() => fetchProject(true)}
       />

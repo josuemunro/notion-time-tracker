@@ -8,6 +8,7 @@ import { useSyncComplete } from '../utils/syncEvents';
 import TaskItem from '../components/common/TaskItem';
 import TimelineView from '../components/TimelineView';
 import MoneyTimer from '../components/MoneyTimer';
+import BillingSchedule from '../components/BillingSchedule';
 import ProjectIcon from '../components/ProjectIcon';
 import AddTaskModal from '../components/AddTaskModal';
 import TaskPricingModal from '../components/TaskPricingModal';
@@ -46,6 +47,7 @@ function HomePage() {
     /^\d{4}-\d{2}-\d{2}$/.test(dateParam || '') ? dateParam : getLocalDateString()
   );
   const [timelineRefresh, setTimelineRefresh] = useState(0); // bump to make the timeline refetch
+  const [billingRefresh, setBillingRefresh] = useState(0); // bump to make the billing area refetch
 
   useEffect(() => {
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateParam || '')) setSelectedDate(dateParam);
@@ -163,6 +165,7 @@ function HomePage() {
       await updateTaskStatus(taskId, 'Done');
       showSuccess('Task marked as done');
       fetchInProgress();
+      setBillingRefresh(n => n + 1); // finished work may now be due
     } catch (err) {
       console.error('Failed to mark task as done:', err);
       showError('Failed to mark task as done');
@@ -172,6 +175,7 @@ function HomePage() {
   const handleTaskCreated = () => {
     showSuccess('Task added to Quick Start');
     fetchInProgress();
+    setBillingRefresh(n => n + 1);
   };
 
   // Delete a finished entry from the day list, with an undo that re-creates it
@@ -465,6 +469,9 @@ function HomePage() {
         </div>
       </div>
 
+      {/* What needs invoicing, and when */}
+      <BillingSchedule refreshToken={billingRefresh} />
+
       {/* Add Task Modal */}
       <AddTaskModal
         isOpen={showAddTaskModal}
@@ -481,6 +488,7 @@ function HomePage() {
           onSaved={() => {
             setPricingTask(null);
             fetchInProgress();
+            setBillingRefresh(n => n + 1);
           }}
         />
       )}

@@ -49,11 +49,13 @@ backend/src/
   settings.js         — Settings table access (timeZone, cached in memory)
   utils/time.js       — Timezone maths (Intl-based): local midnight, day bounds, split-at-midnight
   routes/index.js     — Router mount
-  routes/projects.js  — Project CRUD + billing + Bills endpoints (create/list/delete)
-  routes/tasks.js     — Task queries (Quick Start, filtering)
+  routes/projects.js  — Project CRUD (incl. invoicing defaults) + Bills endpoints (create/list/delete)
+  routes/tasks.js     — Task queries (Quick Start, filtering) + per-task billing plan (GET/PUT /tasks/:id/billing)
+  routes/billing.js   — GET /billing/schedule (home page billing area)
   routes/timeEntries.js — Timer start/stop/rollover + CRUD; every write splits entries at local midnight
   routes/settings.js  — GET/PUT app settings (timezone)
   routes/sync.js      — Notion sync orchestration
+  services/billing.js — Bill maths (source of truth), unbilled billing items, invoice timing rules
   services/notionService.js — Notion API calls + sync logic
 
 frontend/src/
@@ -62,15 +64,19 @@ frontend/src/
   contexts/TimerContext.jsx — Active timer state, favicon, doc title, midnight rollover
   contexts/SettingsContext.jsx — Loads/saves the display timezone (server = source of truth, localStorage cache)
   contexts/ToastContext.jsx — Toast notifications + undo
-  pages/HomePage.jsx  — Dashboard: money timer + Quick Start + Timeline (?date= deep-link) + day entries list (with delete/undo)
+  pages/HomePage.jsx  — Dashboard: money timer + Timeline (?date= deep-link) + Quick Start (2 columns) / day entries tabs + Billing area
   pages/CalendarPage.jsx — Read-only week view (day columns, totals, $ earned)
   pages/SettingsPage.jsx — Timezone picker
-  components/TimelineView.jsx — Day timeline (drag, resize, create, zoom, live timer entry)
+  components/TimelineView.jsx — Day timeline (drag, resize, create, zoom, live timer entry, click → Resume/Delete bar)
+  components/BillingSchedule.jsx — Home billing area: send now / upcoming / in progress, Bill per group
   components/MoneyTimer.jsx — WebGL shader timer with live earnings (replaced XP/streak DopamineTimer)
   components/PreviousBillsSection.jsx — Bill history with task breakdowns (project page)
-  components/TaskPricingModal.jsx — Per-task pricing editor (inherit / custom rate / fixed price)
+  components/TaskPricingModal.jsx — "Pricing & invoicing": rate/fixed price, invoice date, fixed-price payment split, billable (local tasks)
+  components/UnbilledTasksSection.jsx — Project page Unbilled list (server billingItems, with send-by badges)
   utils/timeUtils.js  — Date helpers; all zone-aware via the configured display timezone
   utils/billingUtils.js — Billing + earnings math (mirrors server bill rules)
+  utils/billingSchedule.js — Send-by badge wording + createBill payload
+  utils/syncEvents.js — "Notion sync finished" event (Navbar fires it; pages refetch via useSyncComplete)
 
 frontend/nginx.conf   — Production reverse proxy (proxies /api → backend:3001)
 docker-compose.yml    — Container orchestration
@@ -80,12 +86,13 @@ docker-compose.yml    — Container orchestration
 
 ```
 Clients (id, notionId, name, status)
-  → Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color)
-    → Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage, fixedPrice, hourlyRateOverride)
+  → Projects (id, notionId, name, clientId, notionClientId, budgetedTime, hourlyRate, status, iconType, iconValue, color, invoiceDayOfMonth, paymentTermsDays)
+    → Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage, isManual, fixedPrice, hourlyRateOverride, invoiceDate)
       → TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion)
+      → TaskInstallments (id, taskId, label, amount, dueDate, billId, sortOrder) — fixed-price payment split
     → Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt)
-      → BillTasks (id, billId, taskId, taskName, hoursSpent, fixedPrice, rate)
-Settings (key, value, updatedAt) — `timeZone`, `timestampFormat` (= 'utc' once migrated)
+      → BillTasks (id, billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId)
+Settings (key, value, updatedAt) — `timeZone`, `timestampFormat` (= 'utc' once migrated), `migration:*` one-time data-fix flags
 ```
 
 - `notionId` = Notion page UUID (UNIQUE, used for sync dedup)
@@ -93,7 +100,8 @@ Settings (key, value, updatedAt) — `timeZone`, `timestampFormat` (= 'utc' once
 - Timestamps are **real UTC** ISO 8601 strings (`new Date().toISOString()`); see Timezone below
 - A TimeEntry **never spans a local midnight** — the server splits crossing intervals into one row per day
 - FKs (`clientId`, `projectId`) resolved by `updateLocalRelationalIds()` after sync
-- `Bills`/`BillTasks` are **snapshots** taken at billing time (task names, hours, financials frozen) so history survives task renames/deletions. Financials are computed server-side in `projects.js`. Deleting a bill un-bills its tasks (that's how undo works).
+- `Bills`/`BillTasks` are **snapshots** taken at billing time (task names, hours, financials frozen) so history survives task renames/deletions. Financials are computed server-side (`services/billing.js`). Deleting a bill un-bills its tasks and releases its payments (that's how undo works).
+- `budgetedTime` still syncs from Notion but isn't shown anywhere any more (the projects page leads with unbilled amounts).
 
 ## Important Conventions
 
@@ -103,11 +111,14 @@ Settings (key, value, updatedAt) — `timeZone`, `timestampFormat` (= 'utc' once
 - **Backups**: `GET /api/backup` streams a `VACUUM INTO` copy of the live DB (auth-protected; the Settings page has a download button). `GET /api/backup/snapshots[/:name]` lists/downloads on-volume snapshots. Railway's own volume backups need a paid plan, so this is the backup path.
 - **Currency**: NZD with 15% GST. Time rounded up to nearest 0.25 hrs for billing.
 - **Per-task pricing** (local-only, survives Notion sync): a task inherits the project `hourlyRate`, or has its own `hourlyRateOverride`, or a `fixedPrice` (flat, regardless of hours). Bill math: fixed tasks add their flat price; override tasks bill their rounded hours at their rate; remaining tasks pool hours rounded once at the project rate. Mirrored in `billingUtils.js` (client) and `projects.js` (server, source of truth).
+- **Invoice timing** (`services/billing.js`, home Billing area + project Unbilled list): unbilled work becomes billing items (hourly task with time, unsplit fixed task, or each unbilled payment of a split one). An explicit date wins (payment `dueDate`, task `invoiceDate`); otherwise the task must be `Done` (until then it's "waiting / when done"); finished work is due on the project's next pay-run cutoff (`invoiceDayOfMonth`, clamped to short months) or today if it has none. `paymentTermsDays` gives an expected payment date. Payments must add up to the task's `fixedPrice` (server-validated; invoiced payments are locked). Billing is whole-task — later hours on a billed hourly task don't show as unbilled — hence unfinished work waits by default.
+- **Local tasks** (`isManual`, created in-app) are billable by default; the pricing modal can untick that. Notion tasks take `isBillable` from Notion on every sync.
 - **MoneyTimer earnings**: hourly tasks show session $ ticking up (rate × elapsed); fixed-price tasks show live effective $/hr ticking down (price ÷ total task hours). Shader pauses when tab is hidden; no explicit `loseContext()` on cleanup (breaks React StrictMode remounts).
 - **Assignee filter**: `tasks.js` filters by `'%Josue Munro%'` (hardcoded).
 - **Icon caching**: Notion file URLs expire ~1hr, so icons download to `backend/assets/icons/` on sync.
 - **No auto-sync**: Manual only to avoid Notion rate limits.
 - **Timeline versioning**: When modifying `TimelineView.jsx`, update the version log at the top.
+- **SQLite booleans render as `0`**: `{task.isManual && …}` prints a literal 0 in React when the column is 0 — coerce with `!!` (or map to booleans server-side).
 
 ## Deployment
 

@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const database = require('../database'); // Import the database module
+const { dbRun, dbGet, dbAll } = database;
 
 // GET /api/tasks - Get all tasks (potentially filterable)
 router.get('/', async (req, res, next) => {
@@ -205,12 +206,53 @@ router.patch('/:taskId/status', async (req, res, next) => {
   }
 });
 
-// PATCH /api/tasks/:taskId/pricing - Set per-task pricing (local-only, not synced to Notion)
-// Body: { fixedPrice: number|null, hourlyRateOverride: number|null } — null clears; at most one may be set
-router.patch('/:taskId/pricing', async (req, res, next) => {
-  const db = database.getDb();
+// Per-task billing plan (local-only, never synced to Notion): pricing, when to
+// invoice, a fixed-price payment split, and — for local tasks — billable.
+const isDateString = (v) => {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(v); // rejects 2026-13-01, 2026-02-30
+};
+const roundCents = (n) => Math.round(n * 100) / 100;
+
+async function getTaskBillingPlan(taskId) {
+  const task = await dbGet(`
+    SELECT t.id, t.name, t.status, t.isManual, t.isBillable, t.beenBilled, t.fixedPrice,
+           t.hourlyRateOverride, t.invoiceDate, t.projectId,
+           p.name AS projectName, p.hourlyRate AS projectHourlyRate,
+           p.invoiceDayOfMonth AS projectInvoiceDayOfMonth, p.paymentTermsDays AS projectPaymentTermsDays
+    FROM Tasks t LEFT JOIN Projects p ON p.id = t.projectId
+    WHERE t.id = ?
+  `, [taskId]);
+  if (!task) return null;
+  const installments = await dbAll(
+    `SELECT id, label, amount, dueDate, billId, sortOrder FROM TaskInstallments WHERE taskId = ? ORDER BY sortOrder, id`,
+    [task.id]
+  );
+  return { ...task, isManual: !!task.isManual, isBillable: !!task.isBillable, beenBilled: !!task.beenBilled, installments };
+}
+
+// GET /api/tasks/:taskId/billing - The task's billing plan (pricing, invoice date, payment split)
+router.get('/:taskId/billing', async (req, res, next) => {
+  try {
+    const plan = await getTaskBillingPlan(req.params.taskId);
+    if (!plan) return res.status(404).json({ message: 'Task not found.' });
+    res.json(plan);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/tasks/:taskId/billing - Replace the task's billing plan.
+// Body: { fixedPrice: number|null, hourlyRateOverride: number|null (at most one set),
+//         invoiceDate: 'YYYY-MM-DD'|null (null = follow the project's schedule),
+//         installments: [{ label, amount, dueDate: 'YYYY-MM-DD'|null }] (fixed price only),
+//         isBillable?: boolean (local tasks only — Notion tasks get it from Notion) }
+// `installments` lists the *unbilled* payments; already-invoiced ones are kept as
+// they are. Together they must add up to the fixed price.
+router.put('/:taskId/billing', async (req, res, next) => {
   const { taskId } = req.params;
-  const { fixedPrice = null, hourlyRateOverride = null } = req.body;
+  const { fixedPrice = null, hourlyRateOverride = null, invoiceDate = null, installments = [], isBillable } = req.body;
 
   const validAmount = (v) => v === null || (typeof v === 'number' && !isNaN(v) && v >= 0);
   if (!validAmount(fixedPrice) || !validAmount(hourlyRateOverride)) {
@@ -219,17 +261,71 @@ router.patch('/:taskId/pricing', async (req, res, next) => {
   if (fixedPrice !== null && hourlyRateOverride !== null) {
     return res.status(400).json({ message: 'A task can have a fixed price or an hourly rate override, not both.' });
   }
+  if (invoiceDate !== null && !isDateString(invoiceDate)) {
+    return res.status(400).json({ message: 'invoiceDate must be a YYYY-MM-DD date or null.' });
+  }
+  if (isBillable !== undefined && typeof isBillable !== 'boolean') {
+    return res.status(400).json({ message: 'isBillable must be a boolean.' });
+  }
+  const validInstallment = (i) => i
+    && typeof i.amount === 'number' && !isNaN(i.amount) && i.amount > 0
+    && (i.dueDate == null || isDateString(i.dueDate))
+    && (i.label == null || (typeof i.label === 'string' && i.label.length <= 80));
+  if (!Array.isArray(installments) || !installments.every(validInstallment)) {
+    return res.status(400).json({ message: 'Each payment needs an amount above 0, an optional label (max 80 chars) and a YYYY-MM-DD dueDate or null.' });
+  }
 
   try {
-    db.run(
-      "UPDATE Tasks SET fixedPrice = ?, hourlyRateOverride = ? WHERE id = ?",
-      [fixedPrice, hourlyRateOverride, taskId],
-      function (err) {
-        if (err) return next(err);
-        if (this.changes === 0) return res.status(404).json({ message: 'Task not found.' });
-        res.json({ message: 'Task pricing updated.', taskId: parseInt(taskId), fixedPrice, hourlyRateOverride });
+    const task = await dbGet('SELECT id, isManual, beenBilled FROM Tasks WHERE id = ?', [taskId]);
+    if (!task) return res.status(404).json({ message: 'Task not found.' });
+    const billed = await dbAll('SELECT amount FROM TaskInstallments WHERE taskId = ? AND billId IS NOT NULL', [task.id]);
+
+    if (installments.length > 0 || billed.length > 0) {
+      if (fixedPrice === null) {
+        return res.status(billed.length ? 409 : 400).json({
+          message: billed.length
+            ? 'Some payments of this task are already invoiced, so it has to stay fixed-price. Delete those bills first to change its pricing.'
+            : 'Only fixed-price tasks can be split into payments.',
+        });
       }
-    );
+      const scheduled = roundCents([...billed, ...installments].reduce((sum, i) => sum + i.amount, 0));
+      if (Math.abs(scheduled - roundCents(fixedPrice)) > 0.005) {
+        return res.status(400).json({
+          message: `The payments add up to $${scheduled.toFixed(2)} but the fixed price is $${roundCents(fixedPrice).toFixed(2)}.`,
+        });
+      }
+      if (task.beenBilled && billed.length === 0 && installments.length > 0) {
+        return res.status(409).json({ message: 'This task has already been billed in full, so it can\'t be split into payments.' });
+      }
+    }
+
+    await dbRun('BEGIN TRANSACTION;');
+    try {
+      const setBillable = task.isManual && isBillable !== undefined;
+      await dbRun(
+        `UPDATE Tasks SET fixedPrice = ?, hourlyRateOverride = ?, invoiceDate = ?${setBillable ? ', isBillable = ?' : ''} WHERE id = ?`,
+        [fixedPrice, hourlyRateOverride, invoiceDate, ...(setBillable ? [isBillable ? 1 : 0] : []), task.id]
+      );
+      // Unbilled payments are replaced wholesale; invoiced ones stay put
+      await dbRun('DELETE FROM TaskInstallments WHERE taskId = ? AND billId IS NULL', [task.id]);
+      for (const [index, inst] of installments.entries()) {
+        await dbRun(
+          'INSERT INTO TaskInstallments (taskId, label, amount, dueDate, sortOrder) VALUES (?, ?, ?, ?, ?)',
+          [task.id, inst.label?.trim() || null, roundCents(inst.amount), inst.dueDate || null, billed.length + index]
+        );
+      }
+      // A split task is billed once every payment is
+      if (installments.length > 0) {
+        await dbRun('UPDATE Tasks SET beenBilled = 0 WHERE id = ?', [task.id]);
+      } else if (billed.length > 0) {
+        await dbRun('UPDATE Tasks SET beenBilled = 1 WHERE id = ?', [task.id]);
+      }
+      await dbRun('COMMIT;');
+    } catch (err) {
+      await dbRun('ROLLBACK;').catch(() => { });
+      throw err;
+    }
+    res.json(await getTaskBillingPlan(task.id));
   } catch (error) {
     next(error);
   }

@@ -77,7 +77,7 @@ function PreviousBillsSection({ project, refreshToken = 0 }) {
                     <div>
                       <p className="font-medium text-gray-800">{formatBillDate(bill.createdAt)}</p>
                       <p className="text-sm text-gray-500">
-                        {bill.tasks.length} task{bill.tasks.length !== 1 ? 's' : ''} · {formatHoursHuman(bill.totalHours || 0)}
+                        {bill.tasks.length} item{bill.tasks.length !== 1 ? 's' : ''} · {formatHoursHuman(bill.totalHours || 0)}
                         {' '}(billed as {formatHoursHuman(bill.roundedHours || 0)})
                       </p>
                     </div>
@@ -98,16 +98,19 @@ function PreviousBillsSection({ project, refreshToken = 0 }) {
                             {task.taskName}
                             {task.fixedPrice != null && (
                               <span className="ml-2 inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-medium text-purple-700">
-                                Fixed {formatCurrency(task.fixedPrice)}
+                                {task.installmentId != null ? 'Payment' : 'Fixed'} {formatCurrency(task.fixedPrice)}
                               </span>
                             )}
                           </span>
-                          <span className="text-gray-600 whitespace-nowrap tabular-nums">
-                            {formatHoursHuman(task.hoursSpent || 0)}
-                            <span className="text-gray-400 ml-2">
-                              ({(task.hoursSpent || 0).toFixed(2)}h{task.fixedPrice == null && task.rate != null ? ` @ ${formatCurrency(task.rate)}/hr` : ''})
+                          {/* A payment of a split task carries no hours of its own */}
+                          {task.installmentId == null && (
+                            <span className="text-gray-600 whitespace-nowrap tabular-nums">
+                              {formatHoursHuman(task.hoursSpent || 0)}
+                              <span className="text-gray-400 ml-2">
+                                ({(task.hoursSpent || 0).toFixed(2)}h{task.fixedPrice == null && task.rate != null ? ` @ ${formatCurrency(task.rate)}/hr` : ''})
+                              </span>
                             </span>
-                          </span>
+                          )}
                         </div>
                       ))}
                     </div>

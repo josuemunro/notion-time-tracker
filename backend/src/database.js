@@ -185,6 +185,10 @@ function init() {
           db.run(`ALTER TABLE Projects ADD COLUMN color TEXT`, () => { });
           db.run(`ALTER TABLE Projects ADD COLUMN hourlyRate REAL DEFAULT 0`, () => { });
           db.run(`ALTER TABLE Projects ADD COLUMN isManual BOOLEAN DEFAULT false`, () => { });
+          // Invoicing defaults (local-only): monthly pay-run cutoff day (NULL = invoice
+          // as soon as work is done) and how many days the client usually takes to pay
+          db.run(`ALTER TABLE Projects ADD COLUMN invoiceDayOfMonth INTEGER`, () => { });
+          db.run(`ALTER TABLE Projects ADD COLUMN paymentTermsDays INTEGER`, () => { });
         });
 
         // Tasks Table
@@ -216,6 +220,8 @@ function init() {
           // project hourlyRate, has its own hourly rate, or is fixed-price
           db.run(`ALTER TABLE Tasks ADD COLUMN fixedPrice REAL`, () => { });
           db.run(`ALTER TABLE Tasks ADD COLUMN hourlyRateOverride REAL`, () => { });
+          // Local-only: date (YYYY-MM-DD, display zone) to invoice this task, overriding the project default
+          db.run(`ALTER TABLE Tasks ADD COLUMN invoiceDate TEXT`, () => { });
         });
 
         // TimeEntries Table
@@ -277,6 +283,27 @@ function init() {
           console.log('BillTasks table created or already exists.');
           db.run(`ALTER TABLE BillTasks ADD COLUMN fixedPrice REAL`, () => { });
           db.run(`ALTER TABLE BillTasks ADD COLUMN rate REAL`, () => { });
+          db.run(`ALTER TABLE BillTasks ADD COLUMN installmentId INTEGER`, () => { }); // set when the line is a payment of a split
+        });
+
+        // TaskInstallments — a fixed-price task's billing split. Amounts add up to the
+        // task's fixedPrice; each payment is billed on its own (billId set once invoiced).
+        db.run(`
+          CREATE TABLE IF NOT EXISTS TaskInstallments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            taskId INTEGER NOT NULL,
+            label TEXT,
+            amount REAL NOT NULL,
+            dueDate TEXT, -- YYYY-MM-DD in the display zone; NULL = invoice when the task is done
+            billId INTEGER, -- NULL until invoiced
+            sortOrder INTEGER DEFAULT 0,
+            createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (taskId) REFERENCES Tasks(id) ON DELETE CASCADE,
+            FOREIGN KEY (billId) REFERENCES Bills(id) ON DELETE SET NULL
+          )
+        `, (err) => {
+          if (err) return reject(err);
+          console.log('TaskInstallments table created or already exists.');
         });
 
         // Triggers to update `updatedAt` timestamps (Optional but good practice)
@@ -340,6 +367,9 @@ if (require.main === module && process.argv[2] === 'init') {
 module.exports = {
   init,
   getDb,
+  dbRun, // Promise wrappers: dbRun resolves with the statement (lastID, changes)
+  dbGet,
+  dbAll,
   connect, // Export connect if needed separately
   getBackupsDir,
   vacuumInto,
