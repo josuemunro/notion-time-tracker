@@ -123,6 +123,7 @@ router.get('/:projectId', async (req, res, next) => {
           t.status,
           t.isBillable,
           t.beenBilled,
+          t.isManual,
           t.fixedPrice,
           t.hourlyRateOverride,
           COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent,
@@ -130,7 +131,7 @@ router.get('/:projectId', async (req, res, next) => {
         FROM Tasks t
         LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
         WHERE t.projectId = ?
-        GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.beenBilled, t.fixedPrice, t.hourlyRateOverride
+        GROUP BY t.id, t.notionId, t.name, t.status, t.isBillable, t.beenBilled, t.isManual, t.fixedPrice, t.hourlyRateOverride
         ORDER BY t.name COLLATE NOCASE;
       `;
       db.all(tasksQuery, [project.id], (err, tasks) => {

@@ -94,6 +94,32 @@ async function migrateTimestampsToUtc() {
   }
 }
 
+/**
+ * Run `migrate` once per database, recorded as Settings[flagKey] = 'done'.
+ * For data fixes that must not repeat (e.g. they'd override a later user choice).
+ */
+async function runOnce(flagKey, migrate) {
+  const flag = await dbGet('SELECT value FROM Settings WHERE key = ?', [flagKey]);
+  if (flag && flag.value === 'done') return;
+  await migrate();
+  await dbRun(
+    "INSERT INTO Settings (key, value) VALUES (?, 'done') ON CONFLICT(key) DO UPDATE SET value = 'done'",
+    [flagKey]
+  );
+}
+
+/** Data migrations that run after the schema is in place. */
+async function runDataMigrations() {
+  await migrateTimestampsToUtc();
+
+  // Local tasks used to be created non-billable, so they never reached the
+  // project's Unbilled list. Make the existing ones billable (once).
+  await runOnce('migration:localTasksBillable', async () => {
+    const result = await dbRun('UPDATE Tasks SET isBillable = 1 WHERE isManual = 1 AND NOT COALESCE(isBillable, 0)');
+    if (result.changes) console.log(`Migration: marked ${result.changes} local tasks as billable.`);
+  });
+}
+
 function connect() {
   return new Promise((resolve, reject) => {
     db = new sqlite3.Database(DB_PATH, (err) => {
@@ -281,7 +307,7 @@ function init() {
         `, (err) => {
           if (err) return reject(err);
           console.log('Settings table created or already exists.');
-          migrateTimestampsToUtc().then(resolve).catch(reject);
+          runDataMigrations().then(resolve).catch(reject);
         });
       });
     } catch (error) {

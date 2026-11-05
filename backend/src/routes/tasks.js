@@ -156,9 +156,10 @@ router.post('/', async (req, res, next) => {
       if (!project) return res.status(404).json({ message: 'Project not found.' });
 
       const syntheticNotionId = `local-task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      // Local tasks are billable like Notion tasks (they show in the project's Unbilled list)
       const insertQuery = `
         INSERT INTO Tasks (notionId, name, projectId, status, isManual, isBillable)
-        VALUES (?, ?, ?, 'To Do', 1, 0)
+        VALUES (?, ?, ?, 'To Do', 1, 1)
       `;
 
       db.run(insertQuery, [syntheticNotionId, name.trim(), projectId], function (err) {
@@ -172,7 +173,7 @@ router.post('/', async (req, res, next) => {
             projectId,
             status: 'To Do',
             isManual: true,
-            isBillable: false
+            isBillable: true
           }
         });
       });
