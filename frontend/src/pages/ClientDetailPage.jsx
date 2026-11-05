@@ -17,10 +17,6 @@ const statusChipClass = (status) => {
 };
 
 function ProjectRow({ project }) {
-  const budgetUsedPercent = project.budgetedTime > 0
-    ? Math.min(100, (project.totalHoursSpent / project.budgetedTime) * 100)
-    : 0;
-
   return (
     <Link
       to={`/projects/${project.id}`} // Link to project detail page
@@ -45,16 +41,8 @@ function ProjectRow({ project }) {
       <div className="text-sm text-gray-500 space-y-1">
         <div className="flex items-center">
           <ClockIcon className="h-4 w-4 mr-1.5 text-gray-400" />
-          Logged: {formatHoursHuman(parseFloat(project.totalHoursSpent || 0))} / Budgeted: {formatHoursHuman(parseFloat(project.budgetedTime || 0))}
+          Logged: {formatHoursHuman(parseFloat(project.totalHoursSpent || 0))}
         </div>
-        {project.budgetedTime > 0 && (
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className={`h-2 rounded-full ${budgetUsedPercent > 85 ? 'bg-red-500' : budgetUsedPercent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
-              style={{ width: `${budgetUsedPercent}%` }}
-            ></div>
-          </div>
-        )}
       </div>
     </Link>
   );

@@ -1,6 +1,6 @@
 import React from 'react';
 import { formatHoursHuman } from '../utils/timeUtils';
-import { taskBillAmount, formatNZD } from '../utils/billingUtils';
+import { taskBillAmount, computeBillTotals, formatNZD } from '../utils/billingUtils';
 
 function BillingOverview({ project, tasks }) {
   if (!project || !tasks) return null;
@@ -15,7 +15,8 @@ function BillingOverview({ project, tasks }) {
   const totalUnbillableTime = unbillableTasks.reduce((sum, task) => sum + (task.totalHoursSpent || 0), 0);
 
   const totalBilledAmount = billedTasks.reduce((sum, task) => sum + taskBillAmount(task, project.hourlyRate), 0);
-  const totalUnbilledAmount = unbilledTasks.reduce((sum, task) => sum + taskBillAmount(task, project.hourlyRate), 0);
+  // What billing everything outstanding would come to (bill rounding, ex GST) — matches the projects page
+  const totalUnbilledAmount = computeBillTotals(unbilledTasks, project.hourlyRate).subtotal;
 
   const formatCurrency = formatNZD;
 
@@ -46,7 +47,7 @@ function BillingOverview({ project, tasks }) {
             {formatCurrency(totalUnbilledAmount)}
           </p>
           <p className="text-sm text-yellow-600 mt-1">
-            {formatHoursHuman(totalUnbilledTime)}
+            {formatHoursHuman(totalUnbilledTime)} · ex GST
           </p>
         </div>
 

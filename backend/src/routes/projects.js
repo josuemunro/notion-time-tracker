@@ -3,81 +3,53 @@ const express = require('express');
 const router = express.Router();
 const database = require('../database'); // Import the database module
 const { nowIso } = require('../utils/time'); // Timestamps are real UTC ISO strings
+const billing = require('../services/billing');
 
-// GET /api/projects - Get all projects with aggregated time and client info
-router.get('/', async (req, res, next) => {
-  const db = database.getDb(); // Get db instance inside the handler
-  try {
-    const query = `
-      SELECT
-        p.id,
-        p.notionId,
-        p.name,
-        p.budgetedTime,
-        p.status,
-              p.iconType,
+// Project list rows with logged time, client info and the unbilled summary
+// (amount ex GST, hours, task count, last bill date) from services/billing.
+async function listProjects(whereClause = '') {
+  const db = database.getDb();
+  const rows = await new Promise((resolve, reject) => db.all(`
+    SELECT
+      p.id,
+      p.notionId,
+      p.name,
+      p.hourlyRate,
+      p.status,
+      p.iconType,
       p.iconValue,
       p.color,
-        p.createdAt AS projectCreatedAt,
-        p.updatedAt AS projectUpdatedAt,
-        c.id AS clientId,
-        c.name AS clientName,
-        c.notionId AS clientNotionId,
-        COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent
-      FROM Projects p
-      LEFT JOIN Clients c ON p.clientId = c.id
-      LEFT JOIN Tasks t ON p.id = t.projectId
-      LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
-      GROUP BY p.id, p.notionId, p.name, p.budgetedTime, p.status, p.iconType, p.iconValue, p.color, p.createdAt, p.updatedAt, c.id, c.name, c.notionId
-      ORDER BY p.name COLLATE NOCASE;
-    `;
-    db.all(query, [], (err, rows) => {
-      if (err) return next(err);
-      res.json(rows.map(row => ({
-        ...row,
-        percentageBudgetUsed: row.budgetedTime > 0 ? ((row.totalHoursSpent / row.budgetedTime) * 100) : 0
-      })));
-    });
+      p.createdAt AS projectCreatedAt,
+      p.updatedAt AS projectUpdatedAt,
+      c.id AS clientId,
+      c.name AS clientName,
+      c.notionId AS clientNotionId,
+      COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent
+    FROM Projects p
+    LEFT JOIN Clients c ON p.clientId = c.id
+    LEFT JOIN Tasks t ON p.id = t.projectId
+    LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
+    ${whereClause}
+    GROUP BY p.id
+    ORDER BY p.name COLLATE NOCASE;
+  `, [], (err, result) => (err ? reject(err) : resolve(result))));
+  const summaries = await billing.getUnbilledSummaries();
+  return rows.map(row => ({ ...row, ...summaries[row.id] }));
+}
+
+// GET /api/projects - Get all projects with aggregated time, client info and unbilled summary
+router.get('/', async (req, res, next) => {
+  try {
+    res.json(await listProjects());
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/projects/active - Get all active projects with aggregated time and client info
+// GET /api/projects/active - Active projects with aggregated time, client info and unbilled summary
 router.get('/active', async (req, res, next) => {
-  const db = database.getDb(); // Get db instance inside the handler
   try {
-    const query = `
-      SELECT
-        p.id,
-        p.notionId,
-        p.name,
-        p.budgetedTime,
-        p.status,
-        p.iconType,
-        p.iconValue,
-        p.color,
-        p.createdAt AS projectCreatedAt,
-        p.updatedAt AS projectUpdatedAt,
-        c.id AS clientId,
-        c.name AS clientName,
-        c.notionId AS clientNotionId,
-        COALESCE(SUM(te.duration), 0) / 3600.0 AS totalHoursSpent
-      FROM Projects p
-      LEFT JOIN Clients c ON p.clientId = c.id
-      LEFT JOIN Tasks t ON p.id = t.projectId
-      LEFT JOIN TimeEntries te ON t.id = te.taskId AND te.endTime IS NOT NULL
-      WHERE p.status IN ('Proposal', 'In progress', 'Ongoing')
-      GROUP BY p.id, p.notionId, p.name, p.budgetedTime, p.status, p.iconType, p.iconValue, p.color, p.createdAt, p.updatedAt, c.id, c.name, c.notionId
-      ORDER BY p.name COLLATE NOCASE;
-    `;
-    db.all(query, [], (err, rows) => {
-      if (err) return next(err);
-      res.json(rows.map(row => ({
-        ...row,
-        percentageBudgetUsed: row.budgetedTime > 0 ? ((row.totalHoursSpent / row.budgetedTime) * 100) : 0
-      })));
-    });
+    res.json(await listProjects("WHERE p.status IN ('Proposal', 'In progress', 'Ongoing')"));
   } catch (error) {
     next(error);
   }
@@ -136,11 +108,7 @@ router.get('/:projectId', async (req, res, next) => {
       `;
       db.all(tasksQuery, [project.id], (err, tasks) => {
         if (err) return next(err);
-        res.json({
-          ...project,
-          percentageBudgetUsed: project.budgetedTime > 0 ? ((project.totalHoursSpent / project.budgetedTime) * 100) : 0,
-          tasks
-        });
+        res.json({ ...project, tasks });
       });
     });
   } catch (error) {
@@ -332,25 +300,11 @@ router.post('/:projectId/bills', (req, res, next) => {
         return res.status(400).json({ message: 'Some tasks do not belong to this project.' });
       }
 
-      // Billing rules (mirrored in frontend/src/utils/billingUtils.js):
-      // fixed-price tasks contribute their flat price; hourly-override tasks bill
-      // their own hours (rounded up to 0.25h) at their rate; remaining tasks pool
-      // hours, rounded once, at the project rate. 15% GST on the lot.
-      const roundQ = (h) => Math.ceil(h * 4) / 4;
-      const rate = project.hourlyRate || 0;
-      const fixedTasks = tasks.filter(t => t.fixedPrice != null);
-      const overrideTasks = tasks.filter(t => t.fixedPrice == null && t.hourlyRateOverride != null);
-      const pooledTasks = tasks.filter(t => t.fixedPrice == null && t.hourlyRateOverride == null);
-
-      const totalHours = tasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
-      const pooledHours = pooledTasks.reduce((sum, t) => sum + (t.hoursSpent || 0), 0);
-      const fixedAmount = fixedTasks.reduce((sum, t) => sum + t.fixedPrice, 0);
-      const roundedHours = roundQ(pooledHours) + overrideTasks.reduce((sum, t) => sum + roundQ(t.hoursSpent || 0), 0);
-      const subtotal = roundQ(pooledHours) * rate
-        + overrideTasks.reduce((sum, t) => sum + roundQ(t.hoursSpent || 0) * t.hourlyRateOverride, 0)
-        + fixedAmount;
-      const gst = subtotal * 0.15;
-      const total = subtotal + gst;
+      // Billing rules live in services/billing (mirrored in frontend billingUtils.js)
+      const { totalHours, roundedHours, fixedAmount, subtotal, gst, total, rate } = billing.computeBillTotals(
+        tasks.map(t => ({ hours: t.hoursSpent, fixedPrice: t.fixedPrice, hourlyRateOverride: t.hourlyRateOverride })),
+        project.hourlyRate
+      );
       const createdAt = nowIso();
 
       db.serialize(() => {

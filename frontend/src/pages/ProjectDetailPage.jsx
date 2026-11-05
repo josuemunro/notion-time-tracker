@@ -140,10 +140,6 @@ function ProjectDetailPage() {
   if (error) return <p className="text-center text-red-600 bg-red-50 border border-red-200 p-4 rounded-lg">{error}</p>;
   if (!project) return <p className="text-center text-gray-500">Project not found.</p>;
 
-  const budgetUsedPercent = project.budgetedTime > 0
-    ? Math.min(100, (project.totalHoursSpent / project.budgetedTime) * 100)
-    : 0;
-
   return (
     <div className="space-y-8">
       <Link to="/projects" className="inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors group">
@@ -163,7 +159,11 @@ function ProjectDetailPage() {
             />
             <div>
               <h1 className="text-2xl font-bold tracking-tight text-gray-900 mb-1">{project.name}</h1>
-              <p className="text-sm text-gray-500 mb-1.5">Client: {project.clientName || 'N/A'}</p>
+              <p className="text-sm text-gray-500 mb-1.5">
+                Client: {project.clientName || 'N/A'}
+                <span className="mx-1.5 text-gray-300">·</span>
+                Logged <span className="font-medium text-gray-700">{formatHoursHuman(parseFloat(project.totalHoursSpent || 0))}</span>
+              </p>
               <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">{project.status || 'N/A'}</span>
             </div>
           </div>
@@ -182,7 +182,7 @@ function ProjectDetailPage() {
         </div>
 
         {/* Project Settings Section */}
-        <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
           <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Project Settings</h4>
 
           {/* Color Picker Row */}
@@ -291,29 +291,6 @@ function ProjectDetailPage() {
           {rateError && (
             <p className="text-sm text-red-600 mt-2">{rateError}</p>
           )}
-        </div>
-
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-          <div>
-            <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Budget Usage</h4>
-            <div className="w-full bg-gray-200 rounded-full h-3.5">
-              <div
-                className={`h-3.5 rounded-full ${budgetUsedPercent > 85 ? 'bg-red-500' : budgetUsedPercent > 60 ? 'bg-yellow-500' : 'bg-green-500'}`}
-                style={{ width: `${budgetUsedPercent}%` }}
-              ></div>
-            </div>
-            <p className="text-xs text-gray-500 mt-1 text-right">{budgetUsedPercent.toFixed(0)}%</p>
-          </div>
-          <div>
-            <h4 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">Time Summary</h4>
-            <p className="text-gray-700">
-              Budgeted: <span className="font-semibold">{formatHoursHuman(parseFloat(project.budgetedTime || 0))}</span>
-            </p>
-            <p className="text-gray-700">
-              Logged: <span className="font-semibold">{formatHoursHuman(parseFloat(project.totalHoursSpent || 0))}</span>
-            </p>
-          </div>
         </div>
       </div>
 
