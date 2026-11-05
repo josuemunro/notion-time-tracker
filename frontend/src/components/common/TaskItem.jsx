@@ -45,7 +45,7 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPri
             <span className={`truncate text-sm font-medium ${isThisTaskActive ? 'text-blue-700' : 'text-gray-900'}`} title={name}>
               {name}
             </span>
-            {task.isManual && <span className={`${chip} bg-amber-100 text-amber-700`}>Local</span>}
+            {!!task.isManual && <span className={`${chip} bg-amber-100 text-amber-700`}>Local</span>}
             {task.fixedPrice != null && (
               <span className={`${chip} bg-purple-100 text-purple-700`}>Fixed {formatNZD(task.fixedPrice)}</span>
             )}
@@ -65,7 +65,7 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPri
               <CurrencyDollarIcon className="h-4 w-4" />
             </button>
           )}
-          {task.isManual && onMarkDone && !isThisTaskActive && (
+          {!!task.isManual && onMarkDone && !isThisTaskActive && (
             <button
               onClick={() => onMarkDone(task.id)}
               className="p-1.5 rounded-full text-gray-400 hover:text-green-600 hover:bg-green-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400 transition-colors"
@@ -112,7 +112,7 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPri
                   ACTIVE
                 </span>
               )}
-              {task.isManual && (
+              {!!task.isManual && (
                 <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
                   Local
                 </span>
@@ -146,7 +146,7 @@ function TaskItem({ task, onStartOverride, onStopOverride, onMarkDone, onEditPri
               <CurrencyDollarIcon className="h-5 w-5 sm:h-6 sm:w-6" />
             </button>
           )}
-          {task.isManual && onMarkDone && !isThisTaskActive && (
+          {!!task.isManual && onMarkDone && !isThisTaskActive && (
             <button
               onClick={() => onMarkDone(task.id)}
               className="p-2 rounded-full text-gray-400 hover:text-green-600 hover:bg-green-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2 transition-colors duration-200"
