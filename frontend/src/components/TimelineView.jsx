@@ -1,4 +1,10 @@
 // TimelineView version log
+// v1.6 — Click an entry to select it (ring highlight) instead of arming delete; a floating
+//        Resume / Delete bar sits below the selected entry (outside it, so tiny entries work
+//        too). Resume starts a new timer for the same task. The track is taller to leave room
+//        for the bar. Delete undo now uses the shared toast (ToastContext.showUndo).
+//        Click outside or Esc deselects without creating an entry. Resize handles scale with
+//        entry width (2–12px) — fixed 12px handles used to cover entries under ~24px entirely.
 // v1.5 — Timezone-aware: timestamps are real UTC, positions/labels use the configured display
 //        zone (hoursIntoDay/localTimeToIso); entries that cross local midnight are split by the
 //        server, so refetch when a create/update response says `split`; new `refreshToken` and
@@ -21,6 +27,8 @@ import { formatHoursHuman, formatDurationHuman, formatTime, formatTimeRange, get
 import ProjectIcon from './ProjectIcon';
 import TaskSelectionModal from './TaskSelectionModal';
 import { useTimer } from '../contexts/TimerContext';
+import { useToast } from '../contexts/ToastContext';
+import { PlayIcon, TrashIcon } from '@heroicons/react/24/solid';
 
 // Helper function to calculate optimal text color for contrast
 function getOptimalTextColor(backgroundColor) {
@@ -46,10 +54,11 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
   const [timeEntries, setTimeEntries] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dragState, setDragState] = useState(null);
-  const [deleteMode, setDeleteMode] = useState(null); // Track which entry is in delete mode
+  const [selectedEntryId, setSelectedEntryId] = useState(null); // Entry showing the Resume/Delete bar
+  const selectedEntryIdRef = useRef(null); // Mirror for the document-level listeners
+  selectedEntryIdRef.current = selectedEntryId;
+  const suppressNextClickRef = useRef(false); // The click that deselects must not also create an entry
   const [dragTooltip, setDragTooltip] = useState(null); // { x, y, time }
-  const [deletedEntry, setDeletedEntry] = useState(null); // Store deleted entry for undo
-  const [undoTimeout, setUndoTimeout] = useState(null);
   const [hasDragged, setHasDragged] = useState(false); // Track if user has dragged
   const [hoverPreview, setHoverPreview] = useState(null); // { x, y, startTime, endTime }
   const [showTaskModal, setShowTaskModal] = useState(false);
@@ -59,7 +68,8 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
   const hasDraggedRef = useRef(false); // Use ref for immediate drag detection
 
   // Get timer context: change events for refreshing, active timer for the live entry
-  const { registerTimerChangeCallback, activeTimerDetails, elapsedTime } = useTimer();
+  const { registerTimerChangeCallback, activeTimerDetails, elapsedTime, startTimer } = useTimer();
+  const { showUndo, showError } = useToast();
 
   // Timeline constants
   const ZOOM_LEVELS = [20, 30, 40, 60, 80, 120, 160, 240]; // pixels per hour
@@ -71,7 +81,15 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
   const TIMELINE_HOURS = END_HOUR - START_HOUR + 1; // Include hour 23 (11 PM to midnight)
   // Snap step scales with zoom: finest increment that still spans ≥4px of mouse travel
   const SNAP_MINUTES = [1, 5, 10, 15, 30].find(m => (HOUR_WIDTH / 60) * m >= 4) || 30;
-  const TIMELINE_HEIGHT = 120; // Height of the timeline track
+  // Vertical layout of the track: hour labels on top, entries at ENTRY_TOP..ENTRY_BOTTOM,
+  // then room for the selected entry's floating action bar
+  const ENTRY_TOP = 40;
+  const ENTRY_HEIGHT = 60;
+  const ENTRY_BOTTOM = ENTRY_TOP + ENTRY_HEIGHT;
+  const ENTRY_ZONE_BOTTOM = ENTRY_BOTTOM + 10; // hover/click-to-create area ends here
+  const ACTION_BAR_TOP = ENTRY_BOTTOM + 8;
+  const ACTION_BAR_HALF_WIDTH = 92; // ≈ half the Resume+Delete bar, for edge clamping
+  const TIMELINE_HEIGHT = 152; // Height of the timeline track
   const DEFAULT_DURATION_HOURS = 1; // Default 1 hour for new entries
 
   const scrollContainerRef = useRef(null);
@@ -149,15 +167,17 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
     return unregister; // Cleanup callback on unmount
   }, [registerTimerChangeCallback]);
 
-  // Clear delete mode when clicking outside and cleanup drag states
+  // Deselect when clicking outside (entries and the action bar stop propagation) and cleanup drag states
   useEffect(() => {
     const handleClickOutside = () => {
-      setDeleteMode(null);
+      if (selectedEntryIdRef.current === null) return;
+      suppressNextClickRef.current = true; // this click only deselects
+      setSelectedEntryId(null);
     };
 
     const handleEscape = (e) => {
       if (e.key === 'Escape') {
-        setDeleteMode(null);
+        setSelectedEntryId(null);
         setDragState(null);
         setDragTooltip(null);
         setDragPreview(null);
@@ -165,10 +185,16 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
       }
     };
 
+    // Document click runs after React's handlers, so the suppress flag only ever
+    // covers the click that belongs to the deselecting mousedown
+    const resetSuppress = () => { suppressNextClickRef.current = false; };
+
     document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('click', resetSuppress);
     document.addEventListener('keydown', handleEscape);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('click', resetSuppress);
       document.removeEventListener('keydown', handleEscape);
     };
   }, []);
@@ -177,23 +203,31 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
     try {
       // Remove from UI immediately
       setTimeEntries(prev => prev.filter(te => te.timeEntryId !== entry.timeEntryId));
-      setDeleteMode(null);
-
-      // Store for undo
-      setDeletedEntry(entry);
+      setSelectedEntryId(null);
 
       // Delete from backend
       await deleteTimeEntry(entry.timeEntryId);
       onEntriesChanged?.();
 
-      // Set undo timeout
-      const timeout = setTimeout(() => {
-        setDeletedEntry(null);
-      }, 10000); // 10 seconds to undo
-
-      setUndoTimeout(timeout);
+      // Undo re-creates the entry (it gets a new id, so refetch)
+      showUndo(`Deleted ${entry.taskName} (${formatDurationHuman(entry.duration)})`, async () => {
+        try {
+          await addManualTimeEntry({
+            taskId: entry.taskId,
+            startTime: entry.startTime,
+            endTime: entry.endTime,
+            duration: entry.duration
+          });
+          fetchTimeEntries();
+          onEntriesChanged?.();
+        } catch (error) {
+          console.error('Failed to undo delete:', error);
+          showError('Failed to restore entry');
+        }
+      });
     } catch (error) {
       console.error('Failed to delete time entry:', error);
+      showError('Failed to delete entry');
       // Restore entry on error
       setTimeEntries(prev => [...prev, entry].sort((a, b) => {
         if (!a?.startTime || !b?.startTime) return 0;
@@ -202,33 +236,11 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
     }
   };
 
-  const handleUndo = async () => {
-    if (!deletedEntry) return;
-
-    try {
-      // Clear timeout
-      if (undoTimeout) {
-        clearTimeout(undoTimeout);
-        setUndoTimeout(null);
-      }
-
-      // Recreate the entry
-      const newEntry = {
-        taskId: deletedEntry.taskId,
-        startTime: deletedEntry.startTime,
-        endTime: deletedEntry.endTime,
-        duration: deletedEntry.duration
-      };
-
-      await addManualTimeEntry(newEntry);
-
-      // Add back to UI
-      fetchTimeEntries(); // Refresh to get the new entry with proper ID
-      onEntriesChanged?.();
-      setDeletedEntry(null);
-    } catch (error) {
-      console.error('Failed to undo delete:', error);
-    }
+  // Start a fresh timer on the selected entry's task (auto-stops any running timer;
+  // the timer-change callback refetches the timeline so the live entry appears)
+  const handleResume = (entry) => {
+    setSelectedEntryId(null);
+    startTimer(entry.taskId, entry.taskName, entry.projectName);
   };
 
   const fetchTimeEntries = async () => {
@@ -359,8 +371,8 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
 
   // Handle timeline hover for preview
   const handleTimelineMouseMove = (e) => {
-    // Don't show preview when dragging, in delete mode, or when modal is open
-    if (dragState || dragPreview || deleteMode || showTaskModal) {
+    // Don't show preview when dragging, while an entry is selected, or when modal is open
+    if (dragState || dragPreview || selectedEntryId || showTaskModal) {
       setHoverPreview(null);
       return;
     }
@@ -372,7 +384,7 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
     const relativeY = e.clientY - timelineRect.top;
 
     // Only show preview in the main timeline area (below time labels)
-    if (relativeY < 35 || relativeY > TIMELINE_HEIGHT - 10) {
+    if (relativeY < 35 || relativeY > ENTRY_ZONE_BOTTOM) {
       setHoverPreview(null);
       return;
     }
@@ -384,7 +396,7 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
       const endPixels = getEntryEndPixels(entry);
       // Include the drag handle areas (5px on each side) and expand Y range slightly
       return relativeX >= startPixels - 5 && relativeX <= endPixels + 5 &&
-        relativeY >= 35 && relativeY <= 105;
+        relativeY >= 35 && relativeY <= ENTRY_BOTTOM + 5;
     });
 
     if (isOverEntry) {
@@ -413,7 +425,11 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
 
   // Handle timeline click to create new entry
   const handleTimelineClick = (e) => {
-    if (dragState || dragPreview || deleteMode) return;
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      return;
+    }
+    if (dragState || dragPreview || selectedEntryId) return;
 
     const timelineRect = timelineRef.current?.getBoundingClientRect();
     if (!timelineRect) return;
@@ -421,7 +437,7 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
     const relativeY = e.clientY - timelineRect.top;
 
     // Only create entries in the main timeline area
-    if (relativeY < 35 || relativeY > TIMELINE_HEIGHT - 10) return;
+    if (relativeY < 35 || relativeY > ENTRY_ZONE_BOTTOM) return;
 
     // Check if clicking on an existing entry
     const clickedEntry = timeEntries.find(entry => {
@@ -430,7 +446,7 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
       const endPixels = getEntryEndPixels(entry);
       const relativeX = e.clientX - timelineRect.left;
       return relativeX >= startPixels && relativeX <= endPixels &&
-        relativeY >= 40 && relativeY <= 100;
+        relativeY >= ENTRY_TOP && relativeY <= ENTRY_BOTTOM;
     });
 
     if (clickedEntry) return; // Let the entry handle its own click
@@ -846,7 +862,7 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
       return null;
     }
 
-    const isInDeleteMode = deleteMode === entry.timeEntryId;
+    const isSelected = selectedEntryId === entry.timeEntryId;
     const projectColor = entry.projectColor || '#6366f1'; // Default blue
     const textColor = getOptimalTextColor(projectColor);
 
@@ -855,6 +871,8 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
     const showOnlyIcon = width >= 28 && width < 50;
     const showIconAndTask = width >= 50 && width < 150;
     const showFullInfo = width >= 150;
+    // Resize handles shrink on narrow entries so the middle stays clickable (select/move)
+    const handleWidth = Math.min(12, Math.max(2, Math.floor(Math.max(8, width) / 4)));
 
     const handleEntryMouseDown = (e) => {
       e.stopPropagation();
@@ -864,19 +882,12 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
       // Don't trigger if clicking on drag handles (only left and right edges now)
       const rect = e.currentTarget.getBoundingClientRect();
       const relativeX = e.clientX - rect.left;
-      const handleSize = 3; // Match the actual handle width
+      const handleSize = handleWidth; // Match the actual handle width
       const isOnLeftHandle = relativeX <= handleSize;
       const isOnRightHandle = relativeX >= rect.width - handleSize;
 
       if (isOnLeftHandle || isOnRightHandle) {
         console.log('🚫 Clicked on drag handle, ignoring');
-        return;
-      }
-
-      // If in delete mode, handle delete immediately
-      if (isInDeleteMode) {
-        console.log('🗑️ Entry in delete mode, deleting immediately');
-        handleDelete(entry);
         return;
       }
 
@@ -1068,17 +1079,10 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
 
-        // If we didn't move, treat as click for delete mode
+        // If we didn't move, it's a click: toggle selection (shows the Resume/Delete bar)
         if (!hasMoved) {
-          console.log('👆 Detected click (no movement) after', duration, 'ms - entering delete mode for entry', entry.timeEntryId);
-          setDeleteMode(entry.timeEntryId);
-          console.log('🗑️ Delete mode state set to:', entry.timeEntryId);
-          setTimeout(() => {
-            console.log('⏰ Auto-clearing delete mode after 3 seconds');
-            setDeleteMode(null);
-          }, 3000); // Auto exit after 3 seconds
-        } else {
-          console.log('🏃 Detected drag (had movement) - not entering delete mode');
+          console.log('👆 Detected click (no movement) after', duration, 'ms - toggling selection for entry', entry.timeEntryId);
+          setSelectedEntryId(prev => (prev === entry.timeEntryId ? null : entry.timeEntryId));
         }
       };
 
@@ -1098,26 +1102,20 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
       <div
         key={entry.timeEntryId}
         data-entry-id={entry.timeEntryId}
-        className={`absolute rounded-lg shadow-sm z-10 group transition-all duration-200 cursor-pointer
-          ${isInDeleteMode ? 'ring-4 ring-red-500 bg-red-100 border-2 border-red-600' : 'hover:shadow-md'}`}
+        className={`absolute rounded-lg group transition-shadow duration-200 cursor-pointer
+          ${isSelected ? 'z-20 shadow-lg ring-2 ring-gray-900 ring-offset-2' : 'z-10 shadow-sm hover:shadow-md'}`}
         style={{
           left: `${Math.max(0, startPixels)}px`,
           width: `${Math.max(8, width)}px`,
-          top: '40px',
-          height: '60px',
-          backgroundColor: isInDeleteMode ? 'transparent' : projectColor,
+          top: `${ENTRY_TOP}px`,
+          height: `${ENTRY_HEIGHT}px`,
+          backgroundColor: projectColor,
         }}
         onMouseDown={handleEntryMouseDown}
+        aria-pressed={isSelected}
       >
-        {/* Delete mode overlay - positioned absolutely over entire entry */}
-        {isInDeleteMode && (
-          <div className="absolute inset-0 flex items-center justify-center bg-red-500 text-white rounded-lg font-bold text-sm z-50 border-2 border-red-700 pointer-events-auto overflow-hidden whitespace-nowrap">
-            {width >= 100 ? '🗑️ DELETE?' : '🗑️'}
-          </div>
-        )}
-
         {/* Icon floated above the bar when the entry is too narrow to hold it */}
-        {showIconAbove && !isInDeleteMode && (
+        {showIconAbove && (
           <div className="absolute -top-7 left-1/2 -translate-x-1/2 pointer-events-none z-20">
             <ProjectIcon
               iconType={entry.projectIconType}
@@ -1129,8 +1127,8 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
           </div>
         )}
 
-        {/* Content based on width - pointer-events-none to allow drag handles to work, hidden when in delete mode */}
-        <div className={`p-2 h-full flex items-center ${textColor} pointer-events-none relative z-10 ${isInDeleteMode || showIconAbove ? 'invisible' : ''}`}>
+        {/* Content based on width - pointer-events-none to allow drag handles to work */}
+        <div className={`p-2 h-full flex items-center ${textColor} pointer-events-none relative z-10 ${showIconAbove ? 'invisible' : ''}`}>
           {showOnlyIcon || showIconAbove ? (
             // Only icon for very narrow entries (< 50px)
             <div className="w-full flex items-center justify-center">
@@ -1177,26 +1175,73 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
           )}
         </div>
 
-        {/* Drag areas - only show when not in delete mode */}
-        {!isInDeleteMode && (
-          <>
-            {/* Start drag area for resizing */}
-            <div
-              className="absolute left-0 top-0 bottom-0 w-3 cursor-col-resize z-40 bg-blue-500 opacity-0 hover:opacity-50 transition-opacity"
-              onMouseDown={(e) => handleDragAreaMouseDown(e, 'start')}
-              title="Drag to change start time"
-            />
+        {/* Start drag area for resizing */}
+        <div
+          className="absolute left-0 top-0 bottom-0 cursor-col-resize z-40 bg-blue-500 opacity-0 hover:opacity-50 transition-opacity"
+          style={{ width: `${handleWidth}px` }}
+          onMouseDown={(e) => handleDragAreaMouseDown(e, 'start')}
+          title="Drag to change start time"
+        />
 
-            {/* End drag area for resizing */}
-            <div
-              className="absolute right-0 top-0 bottom-0 w-3 cursor-col-resize z-40 bg-blue-500 opacity-0 hover:opacity-50 transition-opacity"
-              onMouseDown={(e) => handleDragAreaMouseDown(e, 'end')}
-              title="Drag to change end time"
-            />
+        {/* End drag area for resizing */}
+        <div
+          className="absolute right-0 top-0 bottom-0 cursor-col-resize z-40 bg-blue-500 opacity-0 hover:opacity-50 transition-opacity"
+          style={{ width: `${handleWidth}px` }}
+          onMouseDown={(e) => handleDragAreaMouseDown(e, 'end')}
+          title="Drag to change end time"
+        />
+      </div>
+    );
+  };
 
-            {/* Remove the conflicting center drag area - let the main entry handle click/drag */}
-          </>
-        )}
+  // Floating Resume / Delete bar below the selected entry. Always outside the entry
+  // so it works for entries too narrow to hold buttons; centred under it and
+  // clamped so it never runs off either end of the track.
+  const renderSelectionActions = () => {
+    if (!selectedEntryId || dragState || dragPreview) return null;
+    const entry = timeEntries.find(te => te.timeEntryId === selectedEntryId);
+    if (!entry || !entry.endTime) return null;
+
+    const startPixels = timeToPixels(entry.startTime);
+    const endPixels = timeToPixels(entry.endTime);
+    const trackWidth = TIMELINE_HOURS * HOUR_WIDTH;
+    const center = Math.min(
+      Math.max((startPixels + Math.max(8, endPixels - startPixels) / 2), ACTION_BAR_HALF_WIDTH),
+      trackWidth - ACTION_BAR_HALF_WIDTH
+    );
+    const isTaskRunning = activeTimerDetails?.taskId === entry.taskId;
+    // Keep these clicks away from the document deselect listener and the track's create handler
+    const stop = (e) => e.stopPropagation();
+
+    return (
+      <div
+        className="absolute z-40 flex items-center gap-1 rounded-lg bg-white p-1 shadow-lg ring-1 ring-gray-200 cursor-default whitespace-nowrap"
+        style={{ left: `${center}px`, top: `${ACTION_BAR_TOP}px`, transform: 'translateX(-50%)' }}
+        onMouseDown={stop}
+        onClick={stop}
+        role="toolbar"
+        aria-label={`Actions for ${entry.taskName}`}
+      >
+        <button
+          type="button"
+          onClick={() => handleResume(entry)}
+          disabled={isTaskRunning}
+          title={isTaskRunning ? 'This task is already running' : `Start a new timer for ${entry.taskName}`}
+          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-green-700 hover:bg-green-50 disabled:text-gray-400 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
+        >
+          <PlayIcon className="h-4 w-4" />
+          {isTaskRunning ? 'Running' : 'Resume'}
+        </button>
+        <div className="h-5 w-px bg-gray-200" aria-hidden="true" />
+        <button
+          type="button"
+          onClick={() => handleDelete(entry)}
+          title="Delete this entry"
+          className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+        >
+          <TrashIcon className="h-4 w-4" />
+          Delete
+        </button>
       </div>
     );
   };
@@ -1300,7 +1345,7 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
               Timeline for {formatDateString(selectedDate)}
             </h3>
             <p className="text-sm text-gray-600 mt-1">
-              Drag blue handles to resize • Drag entries to move • Click empty areas to create • Click entries to delete
+              Drag blue handles to resize • Drag entries to move • Click empty areas to create • Click an entry to resume or delete it
             </p>
             <p className="text-xs text-gray-500 mt-1">
               Found {timeEntries.length} time entries • Showing 12AM-11PM (full day)
@@ -1391,6 +1436,9 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
           {/* Time entries */}
           {timeEntries.map(renderTimeEntry)}
 
+          {/* Resume / Delete for the selected entry */}
+          {renderSelectionActions()}
+
           {/* Drag preview */}
           {renderDragPreview()}
 
@@ -1416,19 +1464,6 @@ const TimelineView = ({ selectedDate = getLocalDateString(), refreshToken = 0, o
         startTime={pendingTimeEntry?.startTime}
         endTime={pendingTimeEntry?.endTime}
       />
-
-      {/* Undo notification */}
-      {deletedEntry && (
-        <div className="fixed bottom-4 right-4 z-50 bg-gray-800 text-white px-4 py-3 rounded-lg shadow-lg flex items-center space-x-3">
-          <span className="text-sm">Time entry deleted</span>
-          <button
-            onClick={handleUndo}
-            className="bg-blue-500 hover:bg-blue-600 text-white text-sm px-3 py-1 rounded transition-colors"
-          >
-            Undo
-          </button>
-        </div>
-      )}
 
       {/* Drag tooltip */}
       {dragTooltip && (
