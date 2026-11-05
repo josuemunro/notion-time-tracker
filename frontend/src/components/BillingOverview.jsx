@@ -38,6 +38,11 @@ function BillingOverview({ project, tasks }) {
           <p className="text-sm text-green-600 mt-1">
             {billed.billCount} bill{billed.billCount !== 1 ? 's' : ''} · {formatHoursHuman(totalBilledTime)} · ex GST
           </p>
+          {billed.waivedSubtotal > 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              Waived {formatCurrency(billed.waivedSubtotal)} ({formatHoursHuman(billed.waivedHours)})
+            </p>
+          )}
         </div>
 
         {/* Waiting to be Billed */}

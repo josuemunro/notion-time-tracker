@@ -63,9 +63,11 @@ export const getProjectDetails = (projectId) => apiClient.get(`/projects/${proje
 export const updateProject = (projectId, projectData) => apiClient.put(`/projects/${projectId}`, projectData);
 export const createTestProject = () => apiClient.post('/projects/test');
 
-// Bills — taskIds for whole tasks, installmentIds for payments of split fixed-price tasks
-export const createBill = (projectId, { taskIds = [], installmentIds = [] }) =>
-  apiClient.post(`/projects/${projectId}/bills`, { taskIds, installmentIds });
+// Bills — taskIds for tasks (hourly: unbilled time; fixed: the price), installmentIds for
+// payments of split fixed-price tasks. kind: 'invoice' (default), 'external' (already
+// billed elsewhere, on billedOn) or 'waived' (written off); note is optional.
+export const createBill = (projectId, { taskIds = [], installmentIds = [], kind = 'invoice', billedOn = null, note = null }) =>
+  apiClient.post(`/projects/${projectId}/bills`, { taskIds, installmentIds, kind, billedOn, note });
 export const getProjectBills = (projectId) => apiClient.get(`/projects/${projectId}/bills`);
 export const deleteBill = (projectId, billId) => apiClient.delete(`/projects/${projectId}/bills/${billId}`);
 export const deleteProject = (projectId) => apiClient.delete(`/projects/${projectId}`);

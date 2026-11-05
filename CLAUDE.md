@@ -73,6 +73,7 @@ frontend/src/
   components/PreviousBillsSection.jsx — Bill history with task breakdowns (project page)
   components/TaskPricingModal.jsx — "Pricing & invoicing": rate/fixed price, invoice date, fixed-price payment split, billable (local tasks)
   components/UnbilledTasksSection.jsx — Project page Unbilled list (server billingItems, with send-by badges)
+  components/ResolveItemsModal.jsx — Mark items as already billed (on a date) or waive them
   utils/timeUtils.js  — Date helpers; all zone-aware via the configured display timezone
   utils/billingUtils.js — Billing + earnings math (mirrors server bill rules)
   utils/billingSchedule.js — Send-by badge wording + createBill payload
@@ -90,7 +91,7 @@ Clients (id, notionId, name, status)
     → Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage, isManual, fixedPrice, hourlyRateOverride, invoiceDate)
       → TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion, billId) — billId NULL = unbilled, 0 = billed before per-entry tracking
       → TaskInstallments (id, taskId, label, amount, dueDate, billId, sortOrder) — fixed-price payment split
-    → Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt)
+    → Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt, kind, note) — kind: invoice | external | waived
       → BillTasks (id, billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId, taskInvoiceDate)
 Settings (key, value, updatedAt) — `timeZone`, `timestampFormat` (= 'utc' once migrated), `migration:*` one-time data-fix flags
 ```
@@ -101,6 +102,7 @@ Settings (key, value, updatedAt) — `timeZone`, `timestampFormat` (= 'utc' once
 - A TimeEntry **never spans a local midnight** — the server splits crossing intervals into one row per day
 - FKs (`clientId`, `projectId`) resolved by `updateLocalRelationalIds()` after sync
 - `Bills`/`BillTasks` are **snapshots** taken at billing time (task names, hours, financials frozen) so history survives task renames/deletions. Financials are computed server-side (`services/billing.js`). Deleting a bill un-bills its tasks and releases its payments (that's how undo works).
+- **Settling without invoicing**: "Already billed…" and "Waive…" (project Unbilled list, home Billing groups → `ResolveItemsModal`) create bill records with `kind` `external` (billed elsewhere; `createdAt` = midday on the chosen day) or `waived` (written off). They mark work billed exactly like invoices and undo the same way (delete the record — Previous Bills has a delete on every record). Waived records never count as billed money (`getBilledTotals`, last-billed dates, pay-run rollover).
 - `budgetedTime` still syncs from Notion but isn't shown anywhere any more (the projects page leads with unbilled amounts).
 
 ## Important Conventions

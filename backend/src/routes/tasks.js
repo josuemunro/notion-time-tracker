@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const database = require('../database'); // Import the database module
 const { dbRun, dbGet, dbAll } = database;
+const { isDateString } = require('../utils/time');
 
 // GET /api/tasks - Get all tasks (potentially filterable)
 router.get('/', async (req, res, next) => {
@@ -208,11 +209,6 @@ router.patch('/:taskId/status', async (req, res, next) => {
 
 // Per-task billing plan (local-only, never synced to Notion): pricing, when to
 // invoice, a fixed-price payment split, and — for local tasks — billable.
-const isDateString = (v) => {
-  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
-  const d = new Date(`${v}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().startsWith(v); // rejects 2026-13-01, 2026-02-30
-};
 const roundCents = (n) => Math.round(n * 100) / 100;
 
 async function getTaskBillingPlan(taskId) {

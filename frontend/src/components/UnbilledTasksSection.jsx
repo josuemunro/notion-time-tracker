@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { formatHoursHuman } from '../utils/timeUtils';
 import { CheckIcon } from '@heroicons/react/24/solid';
 import BillingModal from './BillingModal';
+import ResolveItemsModal from './ResolveItemsModal';
 import ProjectIcon from './ProjectIcon';
 import EmptyState from './common/EmptyState';
 import { computeBillTotals, formatNZD } from '../utils/billingUtils';
@@ -13,6 +14,7 @@ import { sendByLabel, timingReason, TONE_CLASSES } from '../utils/billingSchedul
 function UnbilledTasksSection({ project, onTasksBilled, onRefresh }) {
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [showBillingModal, setShowBillingModal] = useState(false);
+  const [resolveMode, setResolveMode] = useState(null); // 'external' | 'waived' while settling without an invoice
 
   if (!project) return null;
   const items = project.billingItems || [];
@@ -41,6 +43,7 @@ function UnbilledTasksSection({ project, onTasksBilled, onRefresh }) {
   const handleBillCompleted = async () => {
     setSelectedKeys(new Set());
     setShowBillingModal(false);
+    setResolveMode(null);
     if (onTasksBilled) await onTasksBilled();
     if (onRefresh) onRefresh();
   };
@@ -200,6 +203,15 @@ function UnbilledTasksSection({ project, onTasksBilled, onRefresh }) {
                   >
                     Create Bill
                   </button>
+                  {/* Settle without invoicing here */}
+                  <div className="flex justify-center gap-4 pt-1 text-sm">
+                    <button onClick={() => setResolveMode('external')} className="font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                      Already billed…
+                    </button>
+                    <button onClick={() => setResolveMode('waived')} className="font-medium text-gray-600 hover:text-gray-900 transition-colors">
+                      Waive…
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -212,6 +224,16 @@ function UnbilledTasksSection({ project, onTasksBilled, onRefresh }) {
           project={project}
           items={selectedItems}
           onClose={() => setShowBillingModal(false)}
+          onCompleted={handleBillCompleted}
+        />
+      )}
+
+      {resolveMode && (
+        <ResolveItemsModal
+          project={project}
+          items={selectedItems}
+          initialMode={resolveMode}
+          onClose={() => setResolveMode(null)}
           onCompleted={handleBillCompleted}
         />
       )}

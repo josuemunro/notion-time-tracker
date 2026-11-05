@@ -9,6 +9,7 @@ import { formatHoursHuman } from '../utils/timeUtils';
 import { sendByLabel, shortDate, timingReason, TONE_CLASSES } from '../utils/billingSchedule';
 import ProjectIcon from './ProjectIcon';
 import BillingModal from './BillingModal';
+import ResolveItemsModal from './ResolveItemsModal';
 
 // Home page billing area: what needs invoicing and when, from GET /billing/schedule.
 // Groups are would-be invoices (one project, one send-by date); "Bill" opens the
@@ -18,6 +19,7 @@ function BillingSchedule({ refreshToken = 0 }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [billingGroup, setBillingGroup] = useState(null);
+  const [resolving, setResolving] = useState(null); // { group, mode } — settle without invoicing
   const [showWaiting, setShowWaiting] = useState(false);
   const { registerTimerChangeCallback } = useTimer();
 
@@ -89,6 +91,14 @@ function BillingSchedule({ refreshToken = 0 }) {
               <span className="text-gray-500"> · expect payment around {shortDate(group.expectedPaymentDate)}</span>
             )}
           </p>
+          <div className="mt-1.5 flex gap-3 text-xs">
+            <button onClick={() => setResolving({ group, mode: 'external' })} className="font-medium text-gray-500 hover:text-gray-800 transition-colors">
+              Already billed…
+            </button>
+            <button onClick={() => setResolving({ group, mode: 'waived' })} className="font-medium text-gray-500 hover:text-gray-800 transition-colors">
+              Waive…
+            </button>
+          </div>
         </div>
         <div className="flex-shrink-0 text-right">
           <p className="font-semibold tabular-nums text-gray-900">{formatNZD(group.totals.subtotal)}</p>
@@ -204,6 +214,19 @@ function BillingSchedule({ refreshToken = 0 }) {
           onClose={() => setBillingGroup(null)}
           onCompleted={() => {
             setBillingGroup(null);
+            fetchSchedule();
+          }}
+        />
+      )}
+
+      {resolving && (
+        <ResolveItemsModal
+          project={{ id: resolving.group.projectId, name: resolving.group.projectName, hourlyRate: resolving.group.hourlyRate }}
+          items={resolving.group.items}
+          initialMode={resolving.mode}
+          onClose={() => setResolving(null)}
+          onCompleted={() => {
+            setResolving(null);
             fetchSchedule();
           }}
         />

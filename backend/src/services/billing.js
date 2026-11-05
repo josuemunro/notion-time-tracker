@@ -213,7 +213,8 @@ async function getLastTimeBillDates(timeZone) {
   const rows = await dbAll(`
     SELECT b.projectId, MAX(b.createdAt) AS lastBilledAt
     FROM Bills b
-    WHERE EXISTS (SELECT 1 FROM BillTasks bt WHERE bt.billId = b.id AND bt.installmentId IS NULL)
+    WHERE COALESCE(b.kind, 'invoice') <> 'waived'
+      AND EXISTS (SELECT 1 FROM BillTasks bt WHERE bt.billId = b.id AND bt.installmentId IS NULL)
     GROUP BY b.projectId
   `);
   return new Map(rows.map(r => [r.projectId, localDateString(new Date(r.lastBilledAt), timeZone)]));
@@ -275,12 +276,23 @@ async function getProjectBillingItems(projectId) {
   return projects[0]?.items || [];
 }
 
-/** What's been billed for a project so far: { subtotal (ex GST), hours, billCount }. */
+// Bills.kind: 'invoice' / 'external' are billed money; 'waived' records written-off work
+const BILLED = "(COALESCE(kind, 'invoice') <> 'waived')";
+
+/**
+ * What's been billed for a project so far: { subtotal (ex GST), hours, billCount }
+ * from invoices and external records, plus what was waived { waivedSubtotal, waivedHours }.
+ */
 async function getBilledTotals(projectId) {
-  const [row] = await dbAll(
-    'SELECT COALESCE(SUM(subtotal), 0) AS subtotal, COALESCE(SUM(totalHours), 0) AS hours, COUNT(*) AS billCount FROM Bills WHERE projectId = ?',
-    [projectId]
-  );
+  const [row] = await dbAll(`
+    SELECT
+      COALESCE(SUM(CASE WHEN ${BILLED} THEN subtotal END), 0) AS subtotal,
+      COALESCE(SUM(CASE WHEN ${BILLED} THEN totalHours END), 0) AS hours,
+      COUNT(CASE WHEN ${BILLED} THEN 1 END) AS billCount,
+      COALESCE(SUM(CASE WHEN NOT ${BILLED} THEN subtotal END), 0) AS waivedSubtotal,
+      COALESCE(SUM(CASE WHEN NOT ${BILLED} THEN totalHours END), 0) AS waivedHours
+    FROM Bills WHERE projectId = ?
+  `, [projectId]);
   return row;
 }
 
@@ -291,7 +303,7 @@ async function getBilledTotals(projectId) {
 async function getUnbilledSummaries() {
   const [{ projects }, lastBills] = await Promise.all([
     loadUnbilledItems(),
-    dbAll('SELECT projectId, MAX(createdAt) AS lastBilledAt FROM Bills GROUP BY projectId'),
+    dbAll(`SELECT projectId, MAX(createdAt) AS lastBilledAt FROM Bills WHERE COALESCE(kind, 'invoice') <> 'waived' GROUP BY projectId`),
   ]);
   const lastBilledById = new Map(lastBills.map(b => [b.projectId, b.lastBilledAt]));
   const summaries = {};

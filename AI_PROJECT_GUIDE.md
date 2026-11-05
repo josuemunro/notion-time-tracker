@@ -72,6 +72,7 @@ notion-time-tracker/
         │   ├── TaskPricingModal.jsx     # Pricing & invoicing: pricing, invoice date, payment split
         │   ├── BillingOverview.jsx      # Billed / unbilled summary
         │   ├── UnbilledTasksSection.jsx # Select + preview billing (tasks and split payments, with due dates)
+        │   ├── ResolveItemsModal.jsx    # Mark items already billed (on a date) or waive them
         │   ├── BillingModal.jsx         # Final bill with copy/undo
         │   └── PreviousBillsSection.jsx # Bill history with task breakdowns
         └── utils/
@@ -190,8 +191,8 @@ The client (`TimerContext`) calls `rollover` from its 1-second tick when the loc
 | GET | `/api/projects/active` | Same, for status Proposal/In progress/Ongoing |
 | GET | `/api/projects/:id` | Project detail + tasks (with `invoiceDate`, `unbilledHours`, `installments[]`) + `billingItems[]` (what's unbilled and when to invoice it) + `billedTotals` |
 | PUT | `/api/projects/:id` | Update any of `color` (hex), `hourlyRate`, `invoiceDayOfMonth` (1–31 or null), `paymentTermsDays` (0–365 or null) |
-| POST | `/api/projects/:id/bills` | Create bill snapshot from `taskIds[]` (hourly: their unbilled entries; fixed: the price) and/or `installmentIds[]` (payments of split tasks); computes hours/GST server-side, marks entries/tasks/payments billed. 409 if a task has nothing left to bill |
-| GET | `/api/projects/:id/bills` | List bills (newest first) with task snapshots |
+| POST | `/api/projects/:id/bills` | Create bill snapshot from `taskIds[]` (hourly: their unbilled entries; fixed: the price) and/or `installmentIds[]` (payments of split tasks); computes hours/GST server-side, marks entries/tasks/payments billed. Optional `kind` (`invoice` default, `external` + `billedOn` date, `waived`) and `note`. 409 if a task has nothing left to bill |
+| GET | `/api/projects/:id/bills` | List bills (newest first) with task snapshots, `kind`, `note` |
 | DELETE | `/api/projects/:id/bills/:billId` | Delete bill + un-bill its tasks and payments (undo) |
 | POST | `/api/projects/test` | Create test project + sample tasks |
 | DELETE | `/api/projects/:id` | Cascade delete project, tasks, time entries |
@@ -258,11 +259,11 @@ Clients (id, notionId, name, status)
         ├── Tasks (id, notionId, name, projectId, notionProjectId, status, isBillable, beenBilled, assignee, deadline, taskOrPage, isManual, fixedPrice, hourlyRateOverride, invoiceDate)
         │     ├── TimeEntries (id, taskId, notionTaskId, startTime, endTime, duration, isSyncedToNotion, billId)
         │     └── TaskInstallments (id, taskId, label, amount, dueDate, billId, sortOrder)
-        └── Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt)
+        └── Bills (id, projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt, kind, note)
               └── BillTasks (id, billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId, taskInvoiceDate)
 ```
 
-`Bills`/`BillTasks` are snapshots frozen at billing time — task names and hours are copied in so bill history survives task renames and deletions. Deleting a bill releases its time entries and payments (`billId = NULL`), restores invoice dates it used up, and recomputes `beenBilled`.
+`Bills`/`BillTasks` are snapshots frozen at billing time — task names and hours are copied in so bill history survives task renames and deletions. `Bills.kind` is `invoice` (billed here), `external` (recorded as billed elsewhere — `createdAt` is midday on the chosen day) or `waived` (written off). All three mark their work billed and undo the same way; waived records don't count as billed money. Deleting a bill releases its time entries and payments (`billId = NULL`), restores invoice dates it used up, and recomputes `beenBilled`.
 
 Hourly work is billed **per time entry**: `TimeEntries.billId` is the bill that covered it (NULL = unbilled, 0 = billed before per-entry tracking, set by the one-time `migration:entryBilling`). A bill line's `hoursSpent` is the unbilled time it covered, so a long-running task can be billed every month. `Tasks.beenBilled` now only means "the fixed price has been billed".
 

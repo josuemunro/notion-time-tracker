@@ -423,7 +423,7 @@ function ProjectDetailPage() {
         onTasksBilled={handleTasksBilled}
         onRefresh={() => fetchProject(true)}
       />
-      <PreviousBillsSection project={project} refreshToken={billsRefreshToken} />
+      <PreviousBillsSection project={project} refreshToken={billsRefreshToken} onBillDeleted={() => fetchProject(true)} />
 
       <div>
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Tasks</h2>

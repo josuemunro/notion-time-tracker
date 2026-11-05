@@ -291,6 +291,11 @@ function init() {
           if (err) return reject(err);
           console.log('Bills table created or already exists.');
           db.run(`ALTER TABLE Bills ADD COLUMN fixedAmount REAL DEFAULT 0`, () => { });
+          // 'invoice' = billed here, 'external' = recorded as already billed elsewhere
+          // (createdAt = the date it was billed), 'waived' = written off, never billed.
+          // All three mark their work billed; only invoice/external count as billed money.
+          db.run(`ALTER TABLE Bills ADD COLUMN kind TEXT DEFAULT 'invoice'`, () => { });
+          db.run(`ALTER TABLE Bills ADD COLUMN note TEXT`, () => { });
         });
 
         // BillTasks Table — per-task snapshot within a bill (name/hours frozen at billing time)

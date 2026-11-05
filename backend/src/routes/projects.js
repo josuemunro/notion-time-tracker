@@ -3,7 +3,8 @@ const express = require('express');
 const router = express.Router();
 const database = require('../database'); // Import the database module
 const { dbRun, dbGet, dbAll } = database;
-const { nowIso } = require('../utils/time'); // Timestamps are real UTC ISO strings
+const { nowIso, isDateString, localDateString, zonedTimeToUtc } = require('../utils/time'); // Timestamps are real UTC ISO strings
+const settings = require('../settings');
 const billing = require('../services/billing');
 
 // Project list rows with logged time, client info and the unbilled summary
@@ -207,19 +208,49 @@ router.put('/:projectId', async (req, res, next) => {
 // - split fixed-price tasks are billed through their payments (installmentIds);
 //   the task counts as billed once every payment is
 // A task's invoiceDate is used up by billing it (kept on the line for undo).
+//
+// The same record covers work settled without invoicing here:
+//   kind 'external' — already billed elsewhere; billedOn (YYYY-MM-DD, not in the
+//                     future, default today) becomes the record's date
+//   kind 'waived'   — written off: leaves the billing lists, never counts as billed
+// plus an optional note (≤ 200 chars), e.g. an invoice number or a reason.
+const BILL_KINDS = ['invoice', 'external', 'waived'];
+
 router.post('/:projectId/bills', async (req, res, next) => {
   const { projectId } = req.params;
-  const { taskIds = [], installmentIds = [] } = req.body;
+  const { taskIds = [], installmentIds = [], kind = 'invoice', billedOn = null, note = null } = req.body;
   const isIdList = (v) => Array.isArray(v) && v.every(id => Number.isInteger(id));
 
   if (!isIdList(taskIds) || !isIdList(installmentIds) || taskIds.length + installmentIds.length === 0) {
     return res.status(400).json({ message: 'Pass taskIds and/or installmentIds (arrays of ids); at least one item is required.' });
+  }
+  if (!BILL_KINDS.includes(kind)) {
+    return res.status(400).json({ message: `kind must be one of: ${BILL_KINDS.join(', ')}.` });
+  }
+  if (billedOn !== null && (kind !== 'external' || !isDateString(billedOn))) {
+    return res.status(400).json({ message: 'billedOn must be a YYYY-MM-DD date, and only applies to kind "external".' });
+  }
+  if (note !== null && (typeof note !== 'string' || note.length > 200)) {
+    return res.status(400).json({ message: 'note must be text of at most 200 characters.' });
   }
   const placeholders = (list) => list.map(() => '?').join(',');
 
   try {
     const project = await dbGet(`SELECT id, hourlyRate FROM Projects WHERE id = ? OR notionId = ?`, [projectId, projectId]);
     if (!project) return res.status(404).json({ message: 'Project not found.' });
+
+    // Records of past billing sit at midday on the day they were billed (display zone)
+    let createdAt = nowIso();
+    if (billedOn) {
+      const timeZone = await settings.getTimeZone();
+      if (billedOn > localDateString(new Date(), timeZone)) {
+        return res.status(400).json({ message: 'billedOn can\'t be in the future.' });
+      }
+      if (billedOn !== localDateString(new Date(), timeZone)) {
+        const [year, month, day] = billedOn.split('-').map(Number);
+        createdAt = zonedTimeToUtc({ year, month, day, hour: 12 }, timeZone).toISOString();
+      }
+    }
 
     // Snapshot each task's name, pricing and the time this bill covers
     const tasks = taskIds.length === 0 ? [] : await dbAll(`
@@ -270,15 +301,14 @@ router.post('/:projectId/bills', async (req, res, next) => {
       ...tasks.map(t => ({ hours: t.unbilledHours, fixedPrice: t.fixedPrice, hourlyRateOverride: t.hourlyRateOverride })),
       ...installments.map(i => ({ hours: 0, fixedPrice: i.amount, hourlyRateOverride: null })),
     ], project.hourlyRate);
-    const createdAt = nowIso();
 
     await dbRun('BEGIN TRANSACTION;');
     let billId;
     try {
       ({ lastID: billId } = await dbRun(
-        `INSERT INTO Bills (projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [project.id, totalHours, roundedHours, rate, subtotal, gst, total, fixedAmount, createdAt]
+        `INSERT INTO Bills (projectId, totalHours, roundedHours, hourlyRate, subtotal, gst, total, fixedAmount, createdAt, kind, note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [project.id, totalHours, roundedHours, rate, subtotal, gst, total, fixedAmount, createdAt, kind, note?.trim() || null]
       ));
       const insertLine = `INSERT INTO BillTasks (billId, taskId, taskName, hoursSpent, fixedPrice, rate, installmentId, taskInvoiceDate)
                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
@@ -319,10 +349,10 @@ router.post('/:projectId/bills', async (req, res, next) => {
       throw err;
     }
 
-    console.log(`Bill ${billId} created for project ${project.id}: ${tasks.length} tasks (${entries.length} entries), ${installments.length} payments.`);
+    console.log(`Bill ${billId} (${kind}) created for project ${project.id}: ${tasks.length} tasks (${entries.length} entries), ${installments.length} payments.`);
     res.status(201).json({
       message: 'Bill created successfully.',
-      billId, createdAt, totalHours, roundedHours,
+      billId, kind, createdAt, totalHours, roundedHours,
       hourlyRate: rate, subtotal, gst, total, fixedAmount,
       tasks: tasks.map(({ entryIds, ...t }) => ({ ...t, hoursSpent: t.unbilledHours, entryCount: entryIds.length })),
       installments
